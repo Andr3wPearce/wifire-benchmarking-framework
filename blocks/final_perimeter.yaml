@@ -1,0 +1,7 @@
+name: final_perimeter
+kind: reference
+observes:
+- perimeter
+native:
+  crs: EPSG:4326
+image: registry.example/blocks/final-perimeter:0.1

@@ -1,0 +1,31 @@
+# Run spec: what a user (or the API) submits. Config only, no code.
+workflow: hughes_ignition_comparison
+case:
+  incident: HUGHES
+  crs: EPSG:5070          # working CRS for the case
+  resolution_m: 30        # working grid; adapters regrid to their own needs
+  mode: retrospective
+
+inputs:
+  landscape:
+    source: {block: landfire, version: "2024", layers: [fbfm40, cc, ch, cbh, cbd, elevation]}
+    transforms:
+      - {block: roads_override}
+  weather:
+    source: {block: station_wind}
+    transforms:
+      - {block: windninja}            # needs terrain from the landscape slot
+  moisture:
+    source: {block: fixed_moisture, params: {dead_1h: 0.06}}
+  ignition:                           # two sources = one axis of the comparison
+    sources:
+      - {block: triangulated_ignition}
+      - {block: ngfs_ignition}
+
+models:
+  - {block: farsite, params: {spread_adjustment: [1.2, 1.5]}}   # a list = a sweep
+  - {block: elmfire}
+  - {block: wrf_fire}                                           # will be skipped: no 3D forcing
+
+reference: {block: final_perimeter}
+metrics: [{block: iou}, {block: area_bias}]

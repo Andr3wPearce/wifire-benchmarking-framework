@@ -1,0 +1,8 @@
+name: ngfs_ignition
+kind: source
+slot: ignition
+produces:
+- ignition
+native:
+  crs: EPSG:4326
+image: registry.example/blocks/ngfs:0.2

@@ -1,0 +1,6 @@
+name: area_bias
+kind: metric
+needs:
+- perimeter
+- perimeter
+image: registry.example/blocks/metrics:0.3

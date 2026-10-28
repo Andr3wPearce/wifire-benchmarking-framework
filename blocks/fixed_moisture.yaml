@@ -1,0 +1,13 @@
+name: fixed_moisture
+kind: source
+slot: moisture
+produces:
+- fuel_moisture
+params:
+  dead_1h:
+    type: float
+    default: 0.06
+    range:
+    - 0.02
+    - 0.35
+image: registry.example/blocks/fixed-moisture:0.1

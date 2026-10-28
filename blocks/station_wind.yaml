@@ -1,0 +1,8 @@
+name: station_wind
+kind: source
+slot: weather
+produces:
+- surface_wind
+native:
+  crs: EPSG:4326
+image: registry.example/blocks/station-wind:0.3

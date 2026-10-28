@@ -1,0 +1,13 @@
+name: wrf_fire
+kind: model
+version: '4.6'
+requires:
+- fuel_model_fbfm13
+- elevation
+- atmos_forcing_3d
+- fuel_moisture
+- ignition
+produces:
+- perimeter
+- wrf.ground_heat_flux
+image: registry.example/blocks/wrf-fire:4.6

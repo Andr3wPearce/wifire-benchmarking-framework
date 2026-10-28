@@ -1,0 +1,6 @@
+name: iou
+kind: metric
+needs:
+- perimeter
+- perimeter
+image: registry.example/blocks/metrics:0.3

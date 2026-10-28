@@ -1,0 +1,16 @@
+name: landfire
+kind: source
+slot: landscape
+version: '2024'
+produces:
+- fuel_model_fbfm40
+- canopy_cover
+- canopy_height
+- canopy_base_height
+- canopy_bulk_density
+- elevation
+native:
+  crs: EPSG:5070
+  resolution_m: 30
+image: registry.example/blocks/landfire:2024.1
+rationale: LANDFIRE COGs served by WIFIRE; data selection (version, layers) is part of identity.

@@ -1,0 +1,8 @@
+name: triangulated_ignition
+kind: source
+slot: ignition
+produces:
+- ignition
+native:
+  crs: EPSG:4326
+image: registry.example/blocks/triangulated:0.2

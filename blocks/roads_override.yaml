@@ -1,0 +1,12 @@
+name: roads_override
+kind: transform
+consumes:
+- fuel_model_fbfm40
+produces:
+- fuel_model_fbfm40
+params:
+  replacement_fuel:
+    type: str
+    default: GR2
+image: registry.example/blocks/reclassify:0.4
+rationale: Roads/urban (91-99 except 92/98) set to GR2 so both models treat them alike.

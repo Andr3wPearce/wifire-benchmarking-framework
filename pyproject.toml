@@ -1,0 +1,17 @@
+[project]
+name = "bench"
+version = "0.1.0"
+description = "Composable wildfire spread-model benchmarking framework (SCIL), Dagster prototype"
+requires-python = ">=3.10,<3.14"
+dependencies = ["dagster>=1.10", "dagster-webserver>=1.10", "pyyaml"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.dagster]
+module_name = "bench.definitions"
+code_location_name = "benchmarking"

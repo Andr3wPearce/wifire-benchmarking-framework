@@ -1,0 +1,10 @@
+name: windninja
+kind: transform
+consumes:
+- surface_wind
+- elevation
+produces:
+- gridded_wind
+needs_from_slots:
+  elevation: landscape
+image: registry.example/blocks/windninja:3.11

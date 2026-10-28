@@ -1,0 +1,40 @@
+name: farsite
+kind: model
+version: '1.2'
+requires:
+- fuel_model_fbfm40
+- canopy_cover
+- canopy_height
+- canopy_base_height
+- canopy_bulk_density
+- elevation
+- surface_wind
+- fuel_moisture
+- ignition
+produces:
+- perimeter
+- arrival_time
+params:
+  spread_adjustment:
+    type: float
+    default: 1.5
+    range:
+    - 0.5
+    - 3.0
+    rationale: matched to ELMFIRE so both models spread alike
+  dist_res_m:
+    type: float
+    default: 150
+    rationale: at 60 m FARSITE hung on 5 of 16 test winds
+  spotting:
+    type: bool
+    default: false
+    rationale: runs with spotting never finished in testing
+native:
+  crs: EPSG:5070
+  resolution_m: 150
+resources:
+  cpu: 4
+  memory_gb: 8
+  timeout_min: 2
+image: registry.example/blocks/farsite:1.2
