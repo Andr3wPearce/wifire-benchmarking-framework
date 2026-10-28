@@ -201,13 +201,15 @@ def _submission_sensor(wf, spec_path, runs_part, input_keys, per_run_keys):
             pd = _plans_dir(wf)
             pd.mkdir(parents=True, exist_ok=True)
             new_here, changed = [], []
+            done_parts = context.instance.get_materialized_partitions(per_run_keys[0])
             for r in plan["runs"]:
                 f = pd / f"{r['run_key']}.json"
                 if r["run_key"] in existing:
                     old = json.loads(f.read_text()) if f.exists() else {}
-                    if old.get("run_id") == r["run_id"]:
-                        continue                  # same identity already done: reuse it (cache)
-                    changed.append(r["run_key"])  # same name, new identity (e.g. new block version)
+                    if old.get("run_id") == r["run_id"] and r["run_key"] in done_parts:
+                        continue                  # same identity, and Dagster has it: reuse (cache)
+                    # new identity (e.g. new block version), or Dagster lost it (wiped/failed): redo
+                    changed.append(r["run_key"])
                 else:
                     new_here.append(r["run_key"])
                     existing.add(r["run_key"])
@@ -228,7 +230,7 @@ def _submission_sensor(wf, spec_path, runs_part, input_keys, per_run_keys):
                 run_requests.append(RunRequest(run_key=f"{p.name}:inputs", asset_selection=missing,
                                                tags={"submission": p.name}))
             context.log.info(f"{p.name}: {len(plan['runs'])} runs, {len(new_here)} new, "
-                             f"{len(changed)} re-run (identity changed), "
+                             f"{len(changed)} re-run (changed or not materialized), "
                              f"{len(plan['runs']) - len(new_here) - len(changed)} reused, "
                              f"{len(missing)} input steps to materialize")
         return SensorResult(
