@@ -8,7 +8,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$HOME/.bench-framework"
 mkdir -p "$STATE/dagster_home"
 cd "$REPO"
-export PATH="$HOME/.local/bin:$PATH"
+# double-clicked launchers get a bare PATH: add the usual places minikube/kubectl live
+export PATH="$HOME/.local/bin:$HOME/.homebrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if ! command -v uv >/dev/null; then
   echo "== installing uv (python package manager)"
   curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -43,7 +44,8 @@ if [ "$BENCH_BACKEND" = k8s ]; then
     trap 'kill $MOUNT_PID 2>/dev/null' EXIT
     sleep 3
   else
-    echo "!! minikube isn't running, so real blocks (ELMFIRE) will fail. Start it with 'minikube start'"
+    echo "!! minikube not found or not running ($(command -v minikube || echo 'not on PATH')), so real"
+    echo "   blocks (ELMFIRE) will fail. Start it with 'minikube start'"
     echo "   and relaunch, or run blocks without k8s: BENCH_BACKEND=local (see README)."
   fi
 fi

@@ -92,26 +92,33 @@ def run_container_block(context, *, workflow: str, run_key: str, block: str, man
         client = PipesK8sClient(load_incluster_config=False,
                                 kube_context=os.environ.get("BENCH_KUBE_CONTEXT", "minikube"),  # TEMP(local-dev) default
                                 poll_interval=2.0)
-        invocation = client.run(
-            context=context, extras=extras, image=ex["image"],
-            namespace=os.environ.get("BENCH_K8S_NAMESPACE", "default"),
-            env={"BENCH_ARTIFACT_ROOT": "/artifacts"},
-            base_pod_meta={"labels": {"bench/block": block, "bench/run-key": run["run_id"]}},
-            base_pod_spec={
-                "containers": [{
-                    "name": "block",
-                    # TEMP(local-dev): image built straight into minikube, never pulled;
-                    # on NRP: a registry image with IfNotPresent
-                    "imagePullPolicy": os.environ.get("BENCH_IMAGE_PULL_POLICY", "Never"),
-                    "resources": _k8s_resources(manifest),
-                    "volumeMounts": [{"name": "artifacts", "mountPath": "/artifacts"}],
-                }],
-                # TEMP(local-dev): repo/artifacts mounted into minikube by `minikube mount`;
-                # on NRP: object storage / a PVC instead of a hostPath
-                "volumes": [{"name": "artifacts", "hostPath": {
-                    "path": os.environ.get("BENCH_K8S_ARTIFACT_HOSTPATH", "/bench-artifacts"),
-                    "type": "Directory"}}],
-            })
+        try:
+            invocation = client.run(
+                context=context, extras=extras, image=ex["image"],
+                namespace=os.environ.get("BENCH_K8S_NAMESPACE", "default"),
+                env={"BENCH_ARTIFACT_ROOT": "/artifacts"},
+                base_pod_meta={"labels": {"bench/block": block, "bench/run-key": run["run_id"]}},
+                base_pod_spec={
+                    "containers": [{
+                        "name": "block",
+                        # TEMP(local-dev): image built straight into minikube, never pulled;
+                        # on NRP: a registry image with IfNotPresent
+                        "imagePullPolicy": os.environ.get("BENCH_IMAGE_PULL_POLICY", "Never"),
+                        "resources": _k8s_resources(manifest),
+                        "volumeMounts": [{"name": "artifacts", "mountPath": "/artifacts"}],
+                    }],
+                    # TEMP(local-dev): repo/artifacts mounted into minikube by `minikube mount`;
+                    # on NRP: object storage / a PVC instead of a hostPath
+                    "volumes": [{"name": "artifacts", "hostPath": {
+                        "path": os.environ.get("BENCH_K8S_ARTIFACT_HOSTPATH", "/bench-artifacts"),
+                        "type": "Directory"}}],
+                })
+        except Exception as e:
+            if "ErrImageNeverPull" in str(e) or "ErrImagePull" in str(e) or "ImagePullBackOff" in str(e):
+                raise RuntimeError(  # TEMP(local-dev): on NRP images come from a registry
+                    f"image {ex['image']} isn't in minikube. Build it with "
+                    f"`scripts/build_blocks.sh {block}` (or relaunch, which builds missing images)") from e
+            raise
     else:
         raise ValueError(f"unknown BENCH_BACKEND '{backend}' (use k8s or local)")
 

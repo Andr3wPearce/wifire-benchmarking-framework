@@ -3,6 +3,7 @@
 # Build every real block's image straight into minikube (no registry needed).
 # Usage: scripts/build_blocks.sh [block ...]     default: all blocks under images/
 set -e
+export PATH="$HOME/.homebrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"; cd "$REPO"
 command -v minikube >/dev/null || { echo "minikube not found"; exit 1; }
 minikube status >/dev/null 2>&1 || { echo "minikube isn't running: start it with 'minikube start'"; exit 1; }
