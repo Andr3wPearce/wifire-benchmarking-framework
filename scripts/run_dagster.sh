@@ -20,6 +20,9 @@ if [ ! -x "$STATE/venv/bin/dagster" ]; then
 fi
 uv pip install -q --python "$STATE/venv/bin/python" -e ".[k8s]" pytest
 export DAGSTER_HOME="$STATE/dagster_home" PATH="$STATE/venv/bin:$PATH"
+# conda (and others) point PROJ/GDAL at their own databases; our rasterio ships its own,
+# and mixing them makes every CRS unreadable (EPSG:5070 comes back as a bare LOCAL_CS)
+unset PROJ_LIB PROJ_DATA GDAL_DATA
 PORT="${BENCH_PORT:-3070}"          # not 3000: lots of other dev tools use that
 if curl -s -o /dev/null "http://localhost:$PORT"; then
   echo "!! port $PORT is already in use (another app, or Dagster already running)."

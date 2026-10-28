@@ -45,8 +45,7 @@ def check_raster(path: Path, case: dict) -> list[str]:
         if t.a <= 0 or t.e >= 0:
             problems.append(f"{name}: not north-up (pixel sizes x={t.a}, y={t.e}; "
                             f"need x > 0, y < 0). Convention: {ORIENTATION}")
-        if src.crs is None or src.crs.to_string() != case["crs"]:
-            problems.append(f"{name}: CRS {src.crs} != case CRS {case['crs']}")
+        problems += _crs_problems(name, src.crs, case["crs"])
         res = case.get("resolution_m")
         if res and (abs(abs(t.a) - res) > 1e-6 or abs(abs(t.e) - res) > 1e-6):
             problems.append(f"{name}: resolution {abs(t.a)} x {abs(t.e)} m != case grid {res} m")
@@ -58,6 +57,24 @@ def check_raster(path: Path, case: dict) -> list[str]:
                 problems.append(f"{name}: values {finite.min():g}..{finite.max():g} outside "
                                 f"[{lo}, {hi}] (wrong units or scaling?)")
     return problems
+
+
+def _crs_problems(name: str, crs, case_crs: str) -> list[str]:
+    """Compare CRSs by meaning (not by string), and say so when PROJ itself is broken."""
+    from rasterio.crs import CRS
+
+    try:
+        want = CRS.from_user_input(case_crs)
+    except Exception as e:  # PROJ can't even resolve "EPSG:5070": environment problem
+        return [f"{name}: can't resolve case CRS {case_crs} ({e}). PROJ's database is missing or "
+                "mismatched; check PROJ_DATA/PROJ_LIB (conda sets these)"]
+    if crs is None:
+        return [f"{name}: no CRS (every raster must carry the case CRS)"]
+    if crs == want:
+        return []
+    hint = (" (CRS came back as a bare LOCAL_CS: usually PROJ_DATA/PROJ_LIB pointing at another "
+            "install's database, e.g. conda's)" if "LOCAL_CS" in crs.to_wkt() else "")
+    return [f"{name}: CRS {crs.to_string()[:60]} != case CRS {case_crs}{hint}"]
 
 
 def check_dir(d: Path, case: dict) -> list[str]:
