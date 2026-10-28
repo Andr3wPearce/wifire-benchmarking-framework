@@ -23,6 +23,11 @@ from pathlib import Path
 UPLOAD_LIMIT = 1_000_000          # the WSTC server rejects larger files
 
 
+# shared libraries the pods' slim image lacks (rasterio's wheel links the system expat);
+# shipped alongside pyretechnics and found via LD_LIBRARY_PATH
+EXTRA_LIBS = [Path("/usr/lib/x86_64-linux-gnu/libexpat.so.1")]
+
+
 def pack_pyretechnics(wheel: Path) -> str:
     """Compiled modules only (drop .py/.pxd that have a compiled twin), tar + xz + base85:
     ~0.8 MB instead of the wheel's 1.7 MB as base64."""
@@ -33,8 +38,9 @@ def pack_pyretechnics(wheel: Path) -> str:
                 or (n.endswith(".py") and Path(n).stem not in compiled)]
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as t:
-            for n in sorted(keep):
-                data = z.read(n)
+            files = [(n, z.read(n)) for n in sorted(keep)]
+            files += [(f"bench_libs/{lib.name}", lib.resolve().read_bytes()) for lib in EXTRA_LIBS]
+            for n, data in files:
                 info = tarfile.TarInfo(n)
                 info.size = len(data)
                 t.addfile(info, io.BytesIO(data))

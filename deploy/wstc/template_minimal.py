@@ -98,7 +98,11 @@ def elmfire_synthetic(context: dg.AssetExecutionContext, config: ElmfireConfig, 
         import io, lzma, tarfile
         with tarfile.open(fileobj=io.BytesIO(lzma.decompress(base64.b85decode(PKG_B85)))) as t:
             t.extractall(site)
-        context.log.info(f"pyretechnics (compiled) unpacked into {site}")
+        context.log.info(f"pyretechnics (compiled) + system libs unpacked into {site}")
+    site = _sh(context, [str(py), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"]).strip()
+    # libexpat etc. that the slim pod image lacks (shipped in bench_libs/)
+    block_env = {**os.environ, "BENCH_ARTIFACT_ROOT": str(WORK),
+                 "LD_LIBRARY_PATH": f"{site}/bench_libs:" + os.environ.get("LD_LIBRARY_PATH", "")}
     # 2. the block, exactly as in images/elmfire, run standalone on a run.json
     (WORK / "elmfire_block.py").write_text(BLOCK_SOURCE)
     (WORK / "previews.py").write_text(PREVIEW_SOURCE)
@@ -107,8 +111,7 @@ def elmfire_synthetic(context: dg.AssetExecutionContext, config: ElmfireConfig, 
     (run_dir / "run.json").write_text(json.dumps({
         "model": "elmfire", "case": {"incident": "SYNTHETIC", "crs": "EPSG:5070", "resolution_m": 30},
         "params": config.model_dump(), "inputs": {}}))
-    out = _sh(context, [str(py), str(WORK / "elmfire_block.py"), str(run_dir)],
-              env={**os.environ, "BENCH_ARTIFACT_ROOT": str(WORK)})
+    out = _sh(context, [str(py), str(WORK / "elmfire_block.py"), str(run_dir)], env=block_env)
     for line in out.splitlines():
         if line and not line.startswith((" ", "{", "}", "]")):
             context.log.info(f"[elmfire] {line}")
@@ -117,7 +120,7 @@ def elmfire_synthetic(context: dg.AssetExecutionContext, config: ElmfireConfig, 
     _sh(context, [str(py), "-c",
                   "import sys; sys.path.insert(0, sys.argv[1]); from previews import render_prediction;"
                   "render_prediction(sys.argv[2], float(sys.argv[3]))",
-                  str(WORK), str(run_dir / "prediction"), str(config.duration_min)])
+                  str(WORK), str(run_dir / "prediction"), str(config.duration_min)], env=block_env)
     png = (run_dir / "prediction" / "preview.png").read_bytes()
     context.add_output_metadata({
         **{k: (json.dumps(v) if isinstance(v, (list, dict)) else v) for k, v in summary.items()},
