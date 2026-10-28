@@ -1,4 +1,4 @@
-# Windows entry point: picks a real Linux distro (skips Docker's) and runs scripts/run_dagster.sh in it.
+# TEMP(local-dev): Windows entry point: picks a real Linux distro (skips Docker's) and runs scripts/run_dagster.sh in it.
 $repo = Split-Path -Parent $PSScriptRoot
 $distros = (wsl.exe -l -q) -replace "`0", '' | ForEach-Object { $_.Trim() } |
   Where-Object { $_ -and $_ -notmatch '^docker' }

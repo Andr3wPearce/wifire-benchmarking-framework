@@ -110,6 +110,7 @@ def build_workflow(spec_path: Path):
                                          block=run["model"], manifest=manifest, run=run,
                                          case=plan["case"], inputs=slot_dirs)
             return MaterializeResult(metadata={**result.metadata, **common})
+        # TEMP(dry-run): models without an execution section only write receipts
         payload = {**run, "block": run["model"]}
         base = f"runs/{context.partition_key}"
         run_block(context, wf, f"{base}/prepare", payload, picked)
@@ -147,7 +148,7 @@ def build_workflow(spec_path: Path):
     return assets, [_submission_sensor(wf, spec_path, runs_part, input_keys, [pred_key, *score_keys])]
 
 
-def _step_asset(wf, slot, step, key, deps):
+def _step_asset(wf, slot, step, key, deps):  # TEMP(dry-run): input/reference blocks are receipts only
     doc = step.get("rationale") or step.get("reason") or BLOCKS.get(step["block"], {}).get("rationale")
     kind = {"auto": "transform"}.get(step["kind"], step["kind"])
 
@@ -169,11 +170,13 @@ def _score_asset(wf, metric, pred_key, ref_key, runs_part):
         md = run_block(context, wf, f"runs/{context.partition_key}/score/{metric}",
                        {"block": metric, "image": BLOCKS[metric]["image"], "params": {}},
                        [pred_key.to_user_string(), ref_key.to_user_string()])
-        return MaterializeResult(metadata={**md, "value": MetadataValue.text("(dry run)")})
+        return MaterializeResult(metadata={**md, "value": MetadataValue.text("(dry run)")})  # TEMP(dry-run)
     return _s
 
 
 def _submission_sensor(wf, spec_path, runs_part, input_keys, per_run_keys):
+    # TEMP(api-stand-in): the real API will create partitions and runs directly;
+    # watching a submissions/ folder is only for the prototype
     @sensor(name=f"submissions__{wf}", minimum_interval_seconds=5,
             target=AssetSelection.assets(*input_keys, *per_run_keys),
             default_status=DefaultSensorStatus.RUNNING,

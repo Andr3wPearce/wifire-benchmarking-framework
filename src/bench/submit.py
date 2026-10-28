@@ -1,4 +1,4 @@
-"""Submit a run: the stand-in for POST /runs on the API.
+"""TEMP(api-stand-in): submit a run by dropping a file; replaced by POST /runs on the API.
 
     python -m bench.submit hughes_ignition_comparison
     python -m bench.submit hughes_ignition_comparison --set farsite.spread_adjustment=1.0

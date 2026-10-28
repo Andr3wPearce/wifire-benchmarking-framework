@@ -57,3 +57,29 @@ def test_definitions_load():
     keys = {k.to_user_string() for k in defs.resolve_asset_graph().get_all_asset_keys()}
     assert "hughes_ignition_comparison/prediction" in keys
     assert "hughes_ignition_comparison/weather/station_wind__windninja" in keys
+
+
+def test_conventions_catch_south_up_and_percent_cover(tmp_path):
+    """A south-up raster or canopy cover in % must be rejected at the block boundary."""
+    np = pytest.importorskip("numpy")
+    rasterio = pytest.importorskip("rasterio")
+    from rasterio.transform import Affine, from_origin
+
+    from bench.conventions import check_raster
+    case = {"crs": "EPSG:5070", "resolution_m": 30}
+
+    def write(name, arr, transform):
+        p = tmp_path / f"{name}.tif"
+        with rasterio.open(p, "w", driver="GTiff", height=arr.shape[0], width=arr.shape[1], count=1,
+                           dtype=arr.dtype, crs="EPSG:5070", transform=transform) as d:
+            d.write(arr, 1)
+        return p
+
+    north_up = from_origin(0, 3000, 30, 30)
+    south_up = Affine(30, 0, 0, 0, 30, 0)                      # positive y pixel size
+    ok = write("canopy_cover", np.full((10, 10), 0.4, "float32"), north_up)
+    assert check_raster(ok, case) == []
+    flipped = write("elevation", np.zeros((10, 10), "float32"), south_up)
+    assert any("not north-up" in p for p in check_raster(flipped, case))
+    percent = write("canopy_cover", np.full((10, 10), 40.0, "float32"), north_up)
+    assert any("wrong units" in p for p in check_raster(percent, case))

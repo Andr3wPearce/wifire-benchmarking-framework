@@ -22,18 +22,29 @@ from pathlib import Path
 
 from dagster import MaterializeResult
 
+from .conventions import check_dir
 from .executor import ARTIFACT_ROOT
 from .registry import ROOT
+
+
+class ConventionError(Exception):
+    """An artifact crossing a block boundary breaks docs/conventions.md."""
 
 
 def is_container_block(manifest: dict) -> bool:
     return "execution" in manifest
 
 
+def _is_dry_run(d: Path) -> bool:  # TEMP(dry-run): goes away when every block is real
+    prov = d / "provenance.json"
+    return prov.exists() and json.loads(prov.read_text()).get("dry_run", False)
+
+
 def _k8s_resources(manifest: dict) -> dict:
     """Requests == limits (NRP requires limits within 20% of requests).
     Capped for a laptop minikube via BENCH_K8S_MAX_CPU / BENCH_K8S_MAX_MEMORY_GB."""
     r = manifest.get("resources", {})
+    # TEMP(local-dev): laptop caps; on NRP use the manifest values as-is
     cpu = min(float(r.get("cpu", 1)), float(os.environ.get("BENCH_K8S_MAX_CPU", 1)))
     mem = min(float(r.get("memory_gb", 2)), float(os.environ.get("BENCH_K8S_MAX_MEMORY_GB", 2)))
     q = {"cpu": str(cpu), "memory": f"{mem:g}Gi"}
@@ -52,12 +63,21 @@ def run_container_block(context, *, workflow: str, run_key: str, block: str, man
         "inputs": inputs,                      # paths relative to the artifact root, or null
     }, indent=2))
 
+    # inputs that are real data (not dry-run receipts) must follow the conventions too
+    for slot, rel in inputs.items():
+        d = ARTIFACT_ROOT / rel if rel else None
+        if d and d.is_dir() and not _is_dry_run(d):
+            problems = check_dir(d, case)
+            if problems:
+                raise ConventionError(f"input slot '{slot}' violates docs/conventions.md:\n  "
+                                      + "\n  ".join(problems))
+
     ex = manifest["execution"]
     backend = os.environ.get("BENCH_BACKEND", "k8s")
     extras = {"run_dir": run_dir_rel}
     context.log.info(f"{block}: launching on backend '{backend}', run dir {run_dir_rel}")
 
-    if backend == "local":
+    if backend == "local":  # TEMP(local-dev): debugging without Kubernetes
         from dagster import PipesSubprocessClient
         python = os.environ.get("BENCH_BLOCK_PYTHON")
         if not python:
@@ -70,7 +90,7 @@ def run_container_block(context, *, workflow: str, run_key: str, block: str, man
     elif backend == "k8s":
         from dagster_k8s import PipesK8sClient
         client = PipesK8sClient(load_incluster_config=False,
-                                kube_context=os.environ.get("BENCH_KUBE_CONTEXT", "minikube"),
+                                kube_context=os.environ.get("BENCH_KUBE_CONTEXT", "minikube"),  # TEMP(local-dev) default
                                 poll_interval=2.0)
         invocation = client.run(
             context=context, extras=extras, image=ex["image"],
@@ -80,13 +100,14 @@ def run_container_block(context, *, workflow: str, run_key: str, block: str, man
             base_pod_spec={
                 "containers": [{
                     "name": "block",
-                    # image is built straight into minikube (scripts/build_blocks.sh), never pulled
+                    # TEMP(local-dev): image built straight into minikube, never pulled;
+                    # on NRP: a registry image with IfNotPresent
                     "imagePullPolicy": os.environ.get("BENCH_IMAGE_PULL_POLICY", "Never"),
                     "resources": _k8s_resources(manifest),
                     "volumeMounts": [{"name": "artifacts", "mountPath": "/artifacts"}],
                 }],
-                # repo/artifacts on the host, mounted into the minikube node by
-                # `minikube mount` (started by scripts/run_dagster.sh)
+                # TEMP(local-dev): repo/artifacts mounted into minikube by `minikube mount`;
+                # on NRP: object storage / a PVC instead of a hostPath
                 "volumes": [{"name": "artifacts", "hostPath": {
                     "path": os.environ.get("BENCH_K8S_ARTIFACT_HOSTPATH", "/bench-artifacts"),
                     "type": "Directory"}}],
@@ -95,6 +116,14 @@ def run_container_block(context, *, workflow: str, run_key: str, block: str, man
         raise ValueError(f"unknown BENCH_BACKEND '{backend}' (use k8s or local)")
 
     block_md = dict(invocation.get_materialize_result().metadata or {})
+
+    # docs/conventions.md: check what the block saw and what it produced
+    checked = [run_dir / "prediction"] + [d for d in [run_dir / "synthetic_inputs"] if d.is_dir()]
+    problems = [p for d in checked for p in check_dir(d, case)]
+    if problems:
+        raise ConventionError(f"{block} violates docs/conventions.md:\n  " + "\n  ".join(problems))
+    context.log.info(f"conventions ok: {', '.join(d.name for d in checked)}")
+
     return MaterializeResult(metadata={
         **block_md,
         "backend": backend,

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# TEMP(local-dev): laptop launcher (dagster dev + minikube). Deployment uses the
+# Dagster Helm chart / NRP instead.
 # Runs the Dagster UI for this repo (macOS, Linux, or WSL on Windows). No sudo needed.
 # Code stays in the repo; the venv and Dagster's state live in ~/.bench-framework.
 set -e
@@ -48,7 +50,7 @@ fi
 (
   until curl -s "$URL/server_info" | grep -q dagster; do sleep 2; done
   if ! ls submissions/*.yaml >/dev/null 2>&1; then
-    python -m bench.submit hughes_ignition_comparison --note "first dry run"
+    python -m bench.submit hughes_ignition_comparison --note "first run"   # TEMP(api-stand-in)
   fi
   if command -v open >/dev/null && [ "$(uname)" = Darwin ]; then open "$URL"
   else powershell.exe -NoProfile -Command "Start-Process $URL" >/dev/null 2>&1 || true; fi

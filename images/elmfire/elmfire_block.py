@@ -43,7 +43,7 @@ CANOPY_LAYERS = ["canopy_cover", "canopy_height", "canopy_base_height", "canopy_
 
 
 # --------------------------------------------------------------------------- #
-# synthetic fixture (stand-in until LANDFIRE / weather / ignition blocks are real)
+# TEMP(dry-run): synthetic fixture (stand-in until LANDFIRE / weather / ignition blocks are real)
 # --------------------------------------------------------------------------- #
 def make_synthetic_inputs(d: Path, size: int = 200, cell_m: float = 30.0, crs: str = "EPSG:5070") -> dict:
     """A 6 x 6 km test landscape: grass/grass-shrub with a timber-understory
@@ -100,6 +100,7 @@ def prepare(run: dict, log) -> dict:
     params = run["params"]
     work = Path(run["run_dir"])
     inputs = dict(run.get("inputs", {}))
+    # TEMP(dry-run): fill slots whose upstream blocks are still receipts
     fixture_slots = [s for s in ("landscape", "weather", "moisture", "ignition")
                      if not _is_real(inputs.get(s))]
     if fixture_slots:

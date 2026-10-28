@@ -1,14 +1,11 @@
-"""Generic block executor: the only place a block actually runs.
+"""TEMP(dry-run): this whole module goes away once every block is a real container.
 
-Dry run: log what would run and write the provenance record it would write.
-Going live: replace the body of `run_block` with Dagster Pipes launching the
-block's image as a Kubernetes Job on NRP, e.g.
+Generic block executor for blocks that are not real yet.
 
-    PipesK8sClient().run(context=context, image=payload["image"],
-                         base_pod_spec={...resources from the manifest...})
-
-Every block of every kind goes through this one function, so adding a block
-never means writing orchestration code.
+Logs what the block would run and writes the provenance record it would
+write. Real blocks (manifest has `execution:`) never come here; they run
+through containers.py. When the last block is real, delete this module and
+its call sites (scripts/list_temporary.sh finds them).
 """
 from __future__ import annotations
 

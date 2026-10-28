@@ -29,7 +29,7 @@ reprojection and the workflow's transforms).
 
 ## Canonical inputs (one directory per slot)
 
-Every raster is a single-band GeoTIFF, **north-up**, in the case CRS, on the
+Every raster follows [`conventions.md`](conventions.md) (orientation, directions, units). In short: single-band GeoTIFF, **north-up**, in the case CRS, on the
 case grid, in **SI units**.
 
 | Slot | Files | Units |

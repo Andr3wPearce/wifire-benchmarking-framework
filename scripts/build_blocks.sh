@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# TEMP(local-dev): builds into minikube; deployment pushes images to a registry (CI).
 # Build every real block's image straight into minikube (no registry needed).
 # Usage: scripts/build_blocks.sh [block ...]     default: all blocks under images/
 set -e
