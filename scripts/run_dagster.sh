@@ -54,12 +54,9 @@ if [ "$BENCH_BACKEND" = k8s ]; then
 fi
 (
   until curl -s "$URL/server_info" | grep -q dagster; do sleep 2; done
-  if ! ls submissions/*.yaml >/dev/null 2>&1; then
-    python -m bench.submit hughes_ignition_comparison --note "first run"   # TEMP(api-stand-in)
-  fi
   if command -v open >/dev/null && [ "$(uname)" = Darwin ]; then open "$URL"
   else powershell.exe -NoProfile -Command "Start-Process $URL" >/dev/null 2>&1 || true; fi
-  echo "== Dagster UI: $URL   (submit more runs: scripts/submit.sh --set farsite.spread_adjustment=1.0)"
+  echo "== Dagster UI: $URL   (runs are planned: Materialize them; overrides: scripts/submit.sh <workflow> --set ...)"
 ) &
 echo "== starting Dagster (leave this window open; close it to stop)"
 dagster dev -m bench.definitions -h "$( grep -qi microsoft /proc/version 2>/dev/null && echo 0.0.0.0 || echo 127.0.0.1 )" -p "$PORT"

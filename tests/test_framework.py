@@ -6,12 +6,13 @@ import yaml
 from bench.overrides import apply_overrides
 from bench.registry import BLOCKS, ROOT
 from bench.resolver import resolve
+from bench.workflows import load_spec
 
 SPEC = ROOT / "workflows" / "hughes_ignition_comparison.yaml"
 
 
 def spec(**overrides):
-    return apply_overrides(yaml.safe_load(SPEC.read_text()), overrides)
+    return apply_overrides(load_spec(SPEC), overrides)
 
 
 def test_manifests_load():
@@ -83,3 +84,16 @@ def test_conventions_catch_south_up_and_percent_cover(tmp_path):
     assert any("not north-up" in p for p in check_raster(flipped, case))
     percent = write("canopy_cover", np.full((10, 10), 40.0, "float32"), north_up)
     assert any("wrong units" in p for p in check_raster(percent, case))
+
+
+def test_workflow_name_is_file_name_and_copies_dont_clash(tmp_path):
+    copy = tmp_path / "my_copy.yaml"
+    copy.write_text(SPEC.read_text() + "\nworkflow: hughes_ignition_comparison\n")
+    assert load_spec(copy)["workflow"] == "my_copy"
+
+
+def test_broken_workflow_says_what_is_missing(tmp_path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("models: [{block: elmfire}]\n")
+    with pytest.raises(ValueError, match="missing.*case"):
+        load_spec(bad)

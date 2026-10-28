@@ -14,12 +14,25 @@ and says so in its output.
 (first run: a few minutes), submits a first run, and opens
 <http://localhost:3070> (set `BENCH_PORT` to change it). Keep the window open; closing it stops Dagster.
 
-Submit more runs from a terminal (WSL on Windows) in this folder:
+Every workflow's runs, as written, are planned when Dagster loads it: open the
+workflow's `__runs` group and **Materialize** (pick partitions, or use an asset's
+Lineage tab > Upstream > All > Materialize all). Nothing runs by itself.
+
+For overrides and sweeps on top of a workflow, submit from a terminal in this folder
+(WSL on Windows). Missing inputs run first, then the runs, as one backfill:
 
 ```bash
-scripts/submit.sh --set farsite.spread_adjustment=1.0 --note "lower spread"
-scripts/submit.sh --set farsite.spread_adjustment="[0.8, 1.0]"   # a list = a sweep
+scripts/submit.sh                                    # lists workflows
+scripts/submit.sh hughes_ignition_comparison --set elmfire.duration_min=480
+scripts/submit.sh hughes_ignition_comparison --set farsite.spread_adjustment="[0.8, 1.0]"   # a sweep
 ```
+
+## Composing a workflow
+
+Copy `workflows/hughes_ignition_comparison.yaml` to `workflows/<your_name>.yaml`
+(the **file name is the workflow's name**), edit the blocks and params, and
+relaunch Dagster (a new workflow is a new graph). A workflow file with a mistake
+is skipped with its error in the launcher window; the others still load.
 
 ## Real blocks on minikube
 

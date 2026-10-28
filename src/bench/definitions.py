@@ -16,7 +16,9 @@ runtime as manifests, submissions and partitions.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import warnings
 from pathlib import Path
 
 import yaml
@@ -37,15 +39,26 @@ from dagster import (
     sensor,
 )
 
+from dagster._core.definitions.assets.graph.asset_graph_subset import AssetGraphSubset
+from dagster._core.definitions.events import AssetKeyPartitionKey
+
 from .containers import is_container_block, run_container_block
 from .executor import ARTIFACT_ROOT, run_block
 from .overrides import apply_overrides
 from .registry import BLOCKS, ROOT
 from .resolver import resolve
+from .workflows import load_spec
 
 WORKFLOWS_DIR = ROOT / "workflows"
 SUBMISSIONS_DIR = ROOT / "submissions"
-EAGER = AutomationCondition.eager()
+# Only the report refreshes itself (when scores change). Model runs and scores run exactly
+# when asked: Materialize in the UI, or a submission (which starts a backfill).
+# It covers whatever runs have finished: planned-but-never-run partitions don't hold it back.
+ON_INPUTS_UPDATED = (
+    AutomationCondition.any_deps_updated().since_last_handled()
+    & ~AutomationCondition.any_deps_in_progress()
+    & ~AutomationCondition.in_progress()
+)
 
 
 def _plans_dir(wf: str) -> Path:
@@ -53,7 +66,7 @@ def _plans_dir(wf: str) -> Path:
 
 
 def build_workflow(spec_path: Path):
-    spec = yaml.safe_load(spec_path.read_text())
+    spec = load_spec(spec_path)
     plan = resolve(spec)
     wf = plan["workflow"]
     runs_part = DynamicPartitionsDefinition(name=f"{wf}__runs")
@@ -91,7 +104,7 @@ def build_workflow(spec_path: Path):
     pred_key = AssetKey([wf, "prediction"])
 
     @asset(key=pred_key, deps=list(tails.values()), partitions_def=runs_part,
-           group_name=f"{wf}__runs", kinds={"model"}, automation_condition=EAGER,
+           group_name=f"{wf}__runs", kinds={"model"},
            description="One partition per valid run (model x params x input choices). "
                        "prepare -> execute -> collect through the model's adapter.")
     def prediction(context):
@@ -140,11 +153,13 @@ def build_workflow(spec_path: Path):
         assets.append(_score_asset(wf, metric, pred_key, ref_key, runs_part))
 
     @asset(key=AssetKey([wf, "report"]), deps=score_keys, group_name=f"{wf}__runs",
-           kinds={"report"}, automation_condition=EAGER,
+           kinds={"report"}, automation_condition=ON_INPUTS_UPDATED,
            description="All scored runs plus every skipped combination and why.")
     def report(context):
         pd = _plans_dir(wf)
-        runs = [json.loads(p.read_text()) for p in sorted(pd.glob("*.json")) if not p.name.startswith("_")]
+        planned = [json.loads(p.read_text()) for p in sorted(pd.glob("*.json")) if not p.name.startswith("_")]
+        scored = context.instance.get_materialized_partitions(score_keys[0]) if score_keys else set()
+        runs = [r for r in planned if r["run_key"] in scored]
         skipped = json.loads((pd / "_skipped.json").read_text()) if (pd / "_skipped.json").exists() else []
         rows = ["| run | model | params | inputs |", "|---|---|---|---|"]
         rows += [f"| {r['run_key']} | {r['model']} | {r['params']} | {r['inputs']} |" for r in runs]
@@ -153,7 +168,8 @@ def build_workflow(spec_path: Path):
                        "rationale": f"{len(runs)} runs scored, {len(skipped)} skipped"},
                        [r["run_key"] for r in runs])
         return MaterializeResult(metadata={
-            **md, "runs_scored": len(runs), "skipped": len(skipped),
+            **md, "runs_scored": len(runs), "planned_not_run": len(planned) - len(runs),
+            "skipped": len(skipped),
             "summary": MetadataValue.md("\n".join(rows) + "\n\n**Skipped**\n" + ("\n".join(sk) or "none"))})
     assets.append(report)
 
@@ -176,7 +192,7 @@ def _step_asset(wf, slot, step, key, deps):  # TEMP(dry-run): input/reference bl
 
 def _score_asset(wf, metric, pred_key, ref_key, runs_part):
     @asset(key=AssetKey([wf, "score", metric]), deps=[pred_key, ref_key], partitions_def=runs_part,
-           group_name=f"{wf}__runs", kinds={"metric"}, automation_condition=EAGER,
+           group_name=f"{wf}__runs", kinds={"metric"},
            description=f"Metric block `{metric}`: prediction vs reference.")
     def _s(context):
         md = run_block(context, wf, f"runs/{context.partition_key}/score/{metric}",
@@ -190,21 +206,46 @@ def _submission_sensor(wf, spec_path, runs_part, input_keys, per_run_keys):
     # TEMP(api-stand-in): the real API will create partitions and runs directly;
     # watching a submissions/ folder is only for the prototype
     @sensor(name=f"submissions__{wf}", minimum_interval_seconds=5,
-            target=AssetSelection.assets(*input_keys, *per_run_keys),
+            asset_selection=AssetSelection.assets(*input_keys, *per_run_keys),
             default_status=DefaultSensorStatus.RUNNING,
-            description="Stand-in for the API: each YAML dropped in submissions/ "
-                        "is resolved into runs (partitions); missing inputs are materialized.")
+            description="Plans the workflow as written (runs appear, ready to Materialize), and "
+                        "turns each YAML dropped in submissions/ (API stand-in) into runs.")
     def _sensor(context: SensorEvaluationContext):
         done = set(json.loads(context.cursor or "[]"))
-        new = [p for p in sorted(SUBMISSIONS_DIR.glob("*.yaml")) if p.name not in done]
         run_requests, add_keys, requested = [], [], set()
         existing = set(context.instance.get_dynamic_partitions(runs_part.name))
+
+        # the workflow file as written, planned once per version of the file: its runs show
+        # up as partitions so they can be materialized straight from the UI; nothing starts
+        default_id = "default:" + hashlib.sha1(spec_path.read_bytes()).hexdigest()[:12]
+        if default_id not in done:
+            done.add(default_id)
+            try:
+                plan = resolve(load_spec(spec_path))
+            except ValueError as e:
+                context.log.error(f"workflows/{spec_path.name}: can't plan: {e}")
+                plan = None
+            if plan:
+                pd = _plans_dir(wf)
+                pd.mkdir(parents=True, exist_ok=True)
+                fresh = [r for r in plan["runs"] if r["run_key"] not in existing]
+                for r in fresh:
+                    (pd / f"{r['run_key']}.json").write_text(
+                        json.dumps({**r, "submission": f"workflows/{spec_path.name}"}, indent=2))
+                    existing.add(r["run_key"])
+                add_keys += [r["run_key"] for r in fresh]
+                (pd / "_skipped.json").write_text(json.dumps(plan["skipped"], indent=2))
+                context.log.info(f"workflows/{spec_path.name}: planned {len(plan['runs'])} runs "
+                                 f"({len(fresh)} new), {len(plan['skipped'])} skipped. "
+                                 "Materialize them in the UI.")
+
+        new = [p for p in sorted(SUBMISSIONS_DIR.glob("*.yaml")) if p.name not in done]
         for p in new:
             done.add(p.name)
             sub = yaml.safe_load(p.read_text()) or {}
             if sub.get("workflow") != wf:
                 continue
-            spec = apply_overrides(yaml.safe_load(spec_path.read_text()), sub.get("overrides") or {})
+            spec = apply_overrides(load_spec(spec_path), sub.get("overrides") or {})
             try:
                 plan = resolve(spec)
             except ValueError as e:     # bad submission: reject it, don't crash-loop the sensor
@@ -227,20 +268,22 @@ def _submission_sensor(wf, spec_path, runs_part, input_keys, per_run_keys):
                     existing.add(r["run_key"])
                 f.write_text(json.dumps({**r, "submission": p.name}, indent=2))
             add_keys += new_here
-            for k in changed:                     # redo those partitions explicitly
-                run_requests.append(RunRequest(run_key=f"{p.name}:{k}", partition_key=k,
-                                               asset_selection=per_run_keys, tags={"submission": p.name}))
+            # one backfill per submission: missing inputs (cached ones are reused) and the
+            # new/changed runs; Dagster orders it (inputs first), so nothing races
+            missing = [k for k in input_keys if k not in requested
+                       and context.instance.get_latest_materialization_event(k) is None]
+            requested.update(missing)
+            todo = {AssetKeyPartitionKey(k, None) for k in missing} | {
+                AssetKeyPartitionKey(k, part) for part in new_here + changed for k in per_run_keys}
+            if todo:
+                run_requests.append(RunRequest.for_asset_graph_subset(
+                    AssetGraphSubset.from_asset_partition_set(todo, context.repository_def.asset_graph),
+                    tags={"submission": p.name}))
             (pd / "_skipped.json").write_text(json.dumps(plan["skipped"], indent=2))
             for w in plan["warnings"]:
                 context.log.warning(f"{p.name}: {w}")
             for s in plan["skipped"]:
                 context.log.info(f"{p.name}: SKIPPED {s['model']} {s['inputs']}: {s['reason']}")
-            missing = [k for k in input_keys if k not in requested
-                       and context.instance.get_latest_materialization_event(k) is None]
-            if missing:   # cached inputs are reused; only missing ones run
-                requested.update(missing)
-                run_requests.append(RunRequest(run_key=f"{p.name}:inputs", asset_selection=missing,
-                                               tags={"submission": p.name}))
             context.log.info(f"{p.name}: {len(plan['runs'])} runs, {len(new_here)} new, "
                              f"{len(changed)} re-run (changed or not materialized), "
                              f"{len(plan['runs']) - len(new_here) - len(changed)} reused, "
@@ -253,13 +296,14 @@ def _submission_sensor(wf, spec_path, runs_part, input_keys, per_run_keys):
     return _sensor
 
 
-_assets, _sensors = [], []
+_assets, _sensors, BROKEN_WORKFLOWS = [], [], {}
 for _spec in sorted(WORKFLOWS_DIR.glob("*.yaml")):
-    _name = (yaml.safe_load(_spec.read_text()) or {}).get("workflow")
-    if _name != _spec.stem:   # e.g. a copied workflow whose name wasn't changed
-        raise ValueError(f"workflows/{_spec.name} says `workflow: {_name}`; it must match the "
-                         f"file name: `workflow: {_spec.stem}`")
-    a, s = build_workflow(_spec)
+    try:
+        a, s = build_workflow(_spec)
+    except Exception as e:   # one bad workflow must not take every other one down
+        BROKEN_WORKFLOWS[_spec.name] = f"{type(e).__name__}: {e}"
+        warnings.warn(f"workflows/{_spec.name} skipped: {BROKEN_WORKFLOWS[_spec.name]}")
+        continue
     _assets += a
     _sensors += s
 

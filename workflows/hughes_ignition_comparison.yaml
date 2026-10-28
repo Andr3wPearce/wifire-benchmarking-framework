@@ -1,5 +1,4 @@
-# Run spec: what a user (or the API) submits. Config only, no code.
-workflow: hughes_ignition_comparison
+# A workflow: config only, no code. Its name is the file name.
 case:
   incident: HUGHES
   crs: EPSG:5070          # working CRS for the case

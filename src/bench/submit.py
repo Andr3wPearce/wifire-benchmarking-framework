@@ -1,10 +1,12 @@
 """TEMP(api-stand-in): submit a run by dropping a file; replaced by POST /runs on the API.
 
-    python -m bench.submit hughes_ignition_comparison
-    python -m bench.submit hughes_ignition_comparison --set farsite.spread_adjustment=1.0
+    scripts/submit.sh                                   # lists the workflows
+    scripts/submit.sh hughes_ignition_comparison --set farsite.spread_adjustment=1.0
 
-Writes a small YAML to submissions/; the Dagster sensor picks it up, resolves
-it into runs (partitions) and starts whatever isn't already materialized.
+Only needed for overrides and sweeps: every workflow's runs, as written, are
+already planned when Dagster loads it (Materialize them in the UI). Writes a
+small YAML to submissions/; the Dagster sensor resolves it into runs and starts
+whatever isn't already materialized.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import yaml
 from .overrides import apply_overrides
 from .registry import BLOCKS, ROOT
 from .resolver import resolve
+from .workflows import load_spec
 
 
 def _value(s: str):
@@ -25,14 +28,19 @@ def _value(s: str):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("workflow", help="workflow name (a file in workflows/)")
+    ap.add_argument("workflow", nargs="?", help="workflow name (a file in workflows/, without .yaml)")
     ap.add_argument("--set", action="append", default=[], metavar="BLOCK.PARAM=VALUE",
                     help="override a block param for this run; a list value becomes a sweep")
     ap.add_argument("--note", default="", help="why this run (kept in provenance)")
     a = ap.parse_args(argv)
 
-    if not (ROOT / "workflows" / f"{a.workflow}.yaml").exists():
-        ap.error(f"no workflow '{a.workflow}' in workflows/")
+    available = sorted(p.stem for p in (ROOT / "workflows").glob("*.yaml"))
+    if not a.workflow:
+        print("workflows:\n  " + "\n  ".join(available) + "\n\nusage: scripts/submit.sh <workflow> "
+              "[--set block.param=value ...] [--note '...']")
+        return
+    if a.workflow not in available:
+        ap.error(f"no workflow '{a.workflow}'; available: {', '.join(available)}")
     overrides: dict = {}
     for item in a.set:
         lhs, _, rhs = item.partition("=")
@@ -42,7 +50,7 @@ def main(argv=None):
         overrides.setdefault(block, {})[param] = _value(rhs)
 
     # validate the way the API would (reject before anything is queued)
-    spec = apply_overrides(yaml.safe_load((ROOT / "workflows" / f"{a.workflow}.yaml").read_text()), overrides)
+    spec = apply_overrides(load_spec(ROOT / "workflows" / f"{a.workflow}.yaml"), overrides)
     try:
         plan = resolve(spec)
     except ValueError as e:
