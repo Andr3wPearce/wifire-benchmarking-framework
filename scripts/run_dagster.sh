@@ -35,7 +35,7 @@ if [ "$BENCH_BACKEND" = k8s ]; then
   if command -v minikube >/dev/null && minikube status >/dev/null 2>&1; then
     if ! minikube image ls 2>/dev/null | grep -q "bench/elmfire:0.1"; then
       echo "== ELMFIRE image not in minikube yet, building it"
-      bash scripts/build_blocks.sh elmfire
+      bash scripts/build_blocks.sh elmfire || echo "!! ELMFIRE image build failed: ELMFIRE runs will fail until it builds (scripts/build_blocks.sh elmfire)"
     fi
     # make repo/artifacts visible inside minikube at /bench-artifacts (pods mount that)
     echo "== mounting $REPO/artifacts into minikube at /bench-artifacts"

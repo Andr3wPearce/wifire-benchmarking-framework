@@ -13,5 +13,10 @@ for b in "${blocks[@]}"; do
           || grep -A2 '^execution:' "blocks/$b.yaml" | awk '/image:/{print $2; exit}')
   echo "== building $image from images/$b (first build compiles pyretechnics: a few minutes)"
   minikube image build -t "$image" "images/$b"
+  # `minikube image build` can exit 0 even when the build fails, so check for the image
+  if ! minikube image ls 2>/dev/null | grep -q "$image"; then
+    echo "!! build of $image FAILED (see the output above)"; exit 1
+  fi
+  echo "== $image is in minikube"
 done
 minikube image ls | grep -E "bench/" || true
