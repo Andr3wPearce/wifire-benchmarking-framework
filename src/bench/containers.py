@@ -20,10 +20,11 @@ import json
 import os
 from pathlib import Path
 
-from dagster import MaterializeResult
+from dagster import MaterializeResult, MetadataValue
 
 from .conventions import check_dir
 from .executor import ARTIFACT_ROOT
+from .previews import preview_markdown, render_prediction
 from .registry import ROOT
 
 
@@ -131,7 +132,15 @@ def run_container_block(context, *, workflow: str, run_key: str, block: str, man
         raise ConventionError(f"{block} violates docs/conventions.md:\n  " + "\n  ".join(problems))
     context.log.info(f"conventions ok: {', '.join(d.name for d in checked)}")
 
+    preview = {}
+    try:   # a preview is a convenience: never fail a good run because a picture didn't render
+        png, png_path = render_prediction(run_dir / "prediction", run["params"].get("duration_min"))
+        preview = {"preview": MetadataValue.md(preview_markdown(png)), "preview_png": str(png_path)}
+    except Exception as e:
+        context.log.warning(f"no preview: {type(e).__name__}: {e}")
+
     return MaterializeResult(metadata={
+        **preview,
         **block_md,
         "backend": backend,
         "image": ex["image"],
