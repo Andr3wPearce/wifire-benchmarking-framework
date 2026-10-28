@@ -6,3 +6,4 @@ artifacts/
 submissions/*.yaml
 !submissions/.gitkeep
 .DS_Store
+deploy/wstc/*_bench_minimal.py
