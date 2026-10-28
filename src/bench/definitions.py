@@ -255,6 +255,10 @@ def _submission_sensor(wf, spec_path, runs_part, input_keys, per_run_keys):
 
 _assets, _sensors = [], []
 for _spec in sorted(WORKFLOWS_DIR.glob("*.yaml")):
+    _name = (yaml.safe_load(_spec.read_text()) or {}).get("workflow")
+    if _name != _spec.stem:   # e.g. a copied workflow whose name wasn't changed
+        raise ValueError(f"workflows/{_spec.name} says `workflow: {_name}`; it must match the "
+                         f"file name: `workflow: {_spec.stem}`")
     a, s = build_workflow(_spec)
     _assets += a
     _sensors += s
