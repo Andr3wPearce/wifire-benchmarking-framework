@@ -134,6 +134,7 @@ def resolve(spec: dict) -> dict:
                                          "(fuel models by majority, continuous by mean)")
                 used_optional = sorted(set(mb.get("uses_if_present", [])) & available)
                 runs.append({**desc, "run_id": run_id, "run_key": run_key, "image": mb["image"],
+                             "block_version": mb.get("version"),
                              "resources": mb.get("resources", {}), "adapter_notes": adapter_notes,
                              "uses_optional": used_optional,
                              "reference": spec["reference"]["block"],

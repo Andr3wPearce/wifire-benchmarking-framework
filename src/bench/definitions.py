@@ -99,6 +99,18 @@ def build_workflow(spec_path: Path):
         # the input branch this run uses in each slot ("main" when a slot has one source)
         picked = [tails[(s, run["inputs"].get(s, "main"))].to_user_string() for s in plan["slots"]]
         manifest = BLOCKS[run["model"]]
+        if run.get("block_version") != manifest.get("version"):
+            # the plan was made for an older version of this block (e.g. Materialize clicked
+            # in the UI without resubmitting): bring its params up to the current manifest.
+            # Params the plan already has (user choices) win; new params get their defaults.
+            defaults = {k: v["default"] for k, v in manifest.get("params", {}).items()}
+            added = sorted(set(defaults) - set(run["params"]))
+            run["params"] = {**defaults, **{k: v for k, v in run["params"].items() if k in defaults}}
+            context.log.warning(f"plan for {context.partition_key} was made for {run['model']} "
+                                f"{run.get('block_version', '(unknown version)')}, now {manifest.get('version')}; "
+                                f"using current defaults for {added or 'no new params'}. "
+                                "Resubmit to re-plan properly.")
+            run["block_version"] = manifest.get("version")
         common = {"run_id": run["run_id"], "model": run["model"],
                   "inputs": run["inputs"] or {"(single source per slot)": "-"},
                   "submission": run.get("submission", "-")}
