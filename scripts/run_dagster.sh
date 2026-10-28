@@ -17,14 +17,21 @@ if [ ! -x "$STATE/venv/bin/dagster" ]; then
 fi
 uv pip install -q --python "$STATE/venv/bin/python" -e . pytest
 export DAGSTER_HOME="$STATE/dagster_home" PATH="$STATE/venv/bin:$PATH"
+PORT="${BENCH_PORT:-3070}"          # not 3000: lots of other dev tools use that
+if curl -s -o /dev/null "http://localhost:$PORT"; then
+  echo "!! port $PORT is already in use (another app, or Dagster already running)."
+  echo "   close it, or run with a different port: BENCH_PORT=3071 bash scripts/run_dagster.sh"
+  exit 1
+fi
+URL="http://localhost:$PORT"
 (
-  until curl -s -o /dev/null http://localhost:3000/server_info; do sleep 2; done
+  until curl -s "$URL/server_info" | grep -q dagster; do sleep 2; done
   if ! ls submissions/*.yaml >/dev/null 2>&1; then
     python -m bench.submit hughes_ignition_comparison --note "first dry run"
   fi
-  if command -v open >/dev/null && [ "$(uname)" = Darwin ]; then open http://localhost:3000
-  else powershell.exe -NoProfile -Command "Start-Process http://localhost:3000" >/dev/null 2>&1 || true; fi
-  echo "== Dagster UI: http://localhost:3000   (submit more runs: scripts/submit.sh --set farsite.spread_adjustment=1.0)"
+  if command -v open >/dev/null && [ "$(uname)" = Darwin ]; then open "$URL"
+  else powershell.exe -NoProfile -Command "Start-Process $URL" >/dev/null 2>&1 || true; fi
+  echo "== Dagster UI: $URL   (submit more runs: scripts/submit.sh --set farsite.spread_adjustment=1.0)"
 ) &
 echo "== starting Dagster (leave this window open; close it to stop)"
-exec dagster dev -m bench.definitions -h "$( grep -qi microsoft /proc/version 2>/dev/null && echo 0.0.0.0 || echo 127.0.0.1 )" -p 3000
+exec dagster dev -m bench.definitions -h "$( grep -qi microsoft /proc/version 2>/dev/null && echo 0.0.0.0 || echo 127.0.0.1 )" -p "$PORT"

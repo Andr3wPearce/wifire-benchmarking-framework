@@ -10,7 +10,7 @@ what it would run and write its provenance record.
 
 **macOS:** double-click **`Start Dagster.command`** (first time: right-click > Open, since it is an unsigned script). **Windows:** double-click **`Start Dagster.bat`** (runs inside WSL). Either one sets up Python + Dagster
 (first run: a few minutes), submits a first run, and opens
-<http://localhost:3000>. Keep the window open; closing it stops Dagster.
+<http://localhost:3070> (set `BENCH_PORT` to change it). Keep the window open; closing it stops Dagster.
 
 Submit more runs from a terminal (WSL on Windows) in this folder:
 
