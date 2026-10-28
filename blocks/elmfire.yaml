@@ -1,6 +1,10 @@
 name: elmfire
 kind: model
-version: pyretechnics-2026.1
+version: pyretechnics-2026.10.20
+description: >
+  ELMFIRE-style level-set spread model, via SIG's pyretechnics. First real
+  block: runs in its own container (images/elmfire), everything upstream of it
+  may still be a dry run (then it uses a synthetic test landscape, and says so).
 requires:
 - fuel_model_fbfm40
 - canopy_cover
@@ -17,18 +21,31 @@ produces:
 - perimeter
 - arrival_time
 - fireline_intensity
+- spread_rate
+- flame_length
 params:
   spread_adjustment:
     type: float
     default: 1.5
-    range:
-    - 0.5
-    - 3.0
+    range: [0.5, 3.0]
+    rationale: matched to FARSITE so both models spread alike (pyretechnics fuel_spread_adjustment)
+  duration_min:
+    type: float
+    default: 240
+    range: [10, 4320]
+    rationale: simulated minutes after ignition
+  band_duration_min:
+    type: float
+    default: 60
+    range: [10, 180]
+    rationale: time step of the weather cubes; hourly matches station weather
 native:
-  crs: EPSG:5070
-  resolution_m: 90
+  crs: EPSG:5070          # runs on the case grid at the case resolution (no regrid needed)
 resources:
   cpu: 2
   memory_gb: 8
   timeout_min: 10
-image: registry.example/blocks/elmfire:2026.1
+image: bench/elmfire:0.1
+execution:
+  image: bench/elmfire:0.1                         # k8s backend (built by scripts/build_blocks.sh)
+  local_entrypoint: images/elmfire/elmfire_block.py  # local backend (BENCH_BACKEND=local)

@@ -5,6 +5,9 @@ description = "Composable wildfire spread-model benchmarking framework (SCIL), D
 requires-python = ">=3.10,<3.14"
 dependencies = ["dagster>=1.10", "dagster-webserver>=1.10", "pyyaml"]
 
+[project.optional-dependencies]
+k8s = ["dagster-k8s"]      # run real blocks as Kubernetes pods (minikube locally, NRP later)
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

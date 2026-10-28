@@ -37,6 +37,7 @@ from dagster import (
     sensor,
 )
 
+from .containers import is_container_block, run_container_block
 from .executor import ARTIFACT_ROOT, run_block
 from .overrides import apply_overrides
 from .registry import BLOCKS, ROOT
@@ -57,7 +58,8 @@ def build_workflow(spec_path: Path):
     wf = plan["workflow"]
     runs_part = DynamicPartitionsDefinition(name=f"{wf}__runs")
     assets, input_keys = [], []
-    tails: dict[tuple[str, str], AssetKey] = {}      # (slot, branch) -> last step
+    tails: dict[tuple[str, str], AssetKey] = {}      # (slot, branch) -> last step's asset
+    tail_steps: dict[tuple[str, str], str] = {}      # (slot, branch) -> last step's id
     first_fetch: dict[str, AssetKey] = {}
 
     # ---- inputs: one asset per step, chained per source branch ----
@@ -75,6 +77,7 @@ def build_workflow(spec_path: Path):
                     first_fetch.setdefault(slot, key)
                 prev = key
             tails[(slot, br["branch"])] = prev
+            tail_steps[(slot, br["branch"])] = br["steps"][-1]["step"]
 
     # ---- reference ----
     ref_block = spec["reference"]["block"]
@@ -95,17 +98,26 @@ def build_workflow(spec_path: Path):
         run = json.loads((_plans_dir(wf) / f"{context.partition_key}.json").read_text())
         # the input branch this run uses in each slot ("main" when a slot has one source)
         picked = [tails[(s, run["inputs"].get(s, "main"))].to_user_string() for s in plan["slots"]]
+        manifest = BLOCKS[run["model"]]
+        common = {"run_id": run["run_id"], "model": run["model"],
+                  "inputs": run["inputs"] or {"(single source per slot)": "-"},
+                  "submission": run.get("submission", "-")}
+        if is_container_block(manifest):
+            # real block: hand it the artifact dir of the last step in each input slot
+            slot_dirs = {s: f"{wf}/" + tail_steps[(s, run["inputs"].get(s, "main"))].replace(".", "/")
+                         for s in plan["slots"]}
+            result = run_container_block(context, workflow=wf, run_key=context.partition_key,
+                                         block=run["model"], manifest=manifest, run=run,
+                                         case=plan["case"], inputs=slot_dirs)
+            return MaterializeResult(metadata={**result.metadata, **common})
         payload = {**run, "block": run["model"]}
         base = f"runs/{context.partition_key}"
         run_block(context, wf, f"{base}/prepare", payload, picked)
         run_block(context, wf, f"{base}/execute", payload, [f"{base}/prepare"])
         md = run_block(context, wf, f"{base}/collect", payload, [f"{base}/execute"])
         return MaterializeResult(metadata={
-            **md, "run_id": run["run_id"], "model": run["model"],
-            "inputs": run["inputs"] or {"(single source per slot)": "-"},
-            "resources": run.get("resources") or {},
+            **md, **common, "resources": run.get("resources") or {},
             "uses_optional": ", ".join(run.get("uses_optional", [])) or "-",
-            "submission": run.get("submission", "-"),
         })
     assets.append(prediction)
 
@@ -132,7 +144,7 @@ def build_workflow(spec_path: Path):
             "summary": MetadataValue.md("\n".join(rows) + "\n\n**Skipped**\n" + ("\n".join(sk) or "none"))})
     assets.append(report)
 
-    return assets, [_submission_sensor(wf, spec_path, runs_part, input_keys)]
+    return assets, [_submission_sensor(wf, spec_path, runs_part, input_keys, [pred_key, *score_keys])]
 
 
 def _step_asset(wf, slot, step, key, deps):
@@ -161,9 +173,9 @@ def _score_asset(wf, metric, pred_key, ref_key, runs_part):
     return _s
 
 
-def _submission_sensor(wf, spec_path, runs_part, input_keys):
+def _submission_sensor(wf, spec_path, runs_part, input_keys, per_run_keys):
     @sensor(name=f"submissions__{wf}", minimum_interval_seconds=5,
-            target=AssetSelection.assets(*input_keys),
+            target=AssetSelection.assets(*input_keys, *per_run_keys),
             default_status=DefaultSensorStatus.RUNNING,
             description="Stand-in for the API: each YAML dropped in submissions/ "
                         "is resolved into runs (partitions); missing inputs are materialized.")
@@ -185,14 +197,22 @@ def _submission_sensor(wf, spec_path, runs_part, input_keys):
                 continue
             pd = _plans_dir(wf)
             pd.mkdir(parents=True, exist_ok=True)
-            new_here = []
+            new_here, changed = [], []
             for r in plan["runs"]:
-                if r["run_key"] in existing:      # same identity already planned: reuse it (cache)
-                    continue
-                (pd / f"{r['run_key']}.json").write_text(json.dumps({**r, "submission": p.name}, indent=2))
-                new_here.append(r["run_key"])
-                existing.add(r["run_key"])
+                f = pd / f"{r['run_key']}.json"
+                if r["run_key"] in existing:
+                    old = json.loads(f.read_text()) if f.exists() else {}
+                    if old.get("run_id") == r["run_id"]:
+                        continue                  # same identity already done: reuse it (cache)
+                    changed.append(r["run_key"])  # same name, new identity (e.g. new block version)
+                else:
+                    new_here.append(r["run_key"])
+                    existing.add(r["run_key"])
+                f.write_text(json.dumps({**r, "submission": p.name}, indent=2))
             add_keys += new_here
+            for k in changed:                     # redo those partitions explicitly
+                run_requests.append(RunRequest(run_key=f"{p.name}:{k}", partition_key=k,
+                                               asset_selection=per_run_keys, tags={"submission": p.name}))
             (pd / "_skipped.json").write_text(json.dumps(plan["skipped"], indent=2))
             for w in plan["warnings"]:
                 context.log.warning(f"{p.name}: {w}")
@@ -204,8 +224,9 @@ def _submission_sensor(wf, spec_path, runs_part, input_keys):
                 requested.update(missing)
                 run_requests.append(RunRequest(run_key=f"{p.name}:inputs", asset_selection=missing,
                                                tags={"submission": p.name}))
-            context.log.info(f"{p.name}: {len(plan['runs'])} runs, {len(new_here)} new "
-                             f"({len(plan['runs']) - len(new_here)} reused), "
+            context.log.info(f"{p.name}: {len(plan['runs'])} runs, {len(new_here)} new, "
+                             f"{len(changed)} re-run (identity changed), "
+                             f"{len(plan['runs']) - len(new_here) - len(changed)} reused, "
                              f"{len(missing)} input steps to materialize")
         return SensorResult(
             run_requests=run_requests,

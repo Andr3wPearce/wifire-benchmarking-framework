@@ -2,9 +2,11 @@
 
 A composable framework for benchmarking wildfire spread models: you pick
 **building blocks** in a config file, and the orchestrator handles the rest.
-Right now this is a **dry run**. The graph, dependencies, partitions,
-caching and provenance are all real; the only thing a block does is log
-what it would run and write its provenance record.
+**ELMFIRE (pyretechnics) is the first real block**: it runs in its own
+container on Kubernetes (minikube locally). Every other block is still a
+**dry run** that logs what it would do and writes its provenance record;
+until the input blocks are real, ELMFIRE runs on a synthetic test landscape
+and says so in its output.
 
 ## Run it
 
@@ -19,6 +21,24 @@ scripts/submit.sh --set farsite.spread_adjustment=1.0 --note "lower spread"
 scripts/submit.sh --set farsite.spread_adjustment="[0.8, 1.0]"   # a list = a sweep
 ```
 
+## Real blocks on minikube
+
+Needs `minikube` running (`minikube start`). The launcher then:
+
+1. builds `bench/elmfire:0.1` into minikube if it isn't there
+   (`scripts/build_blocks.sh`; the first build compiles pyretechnics)
+2. mounts `artifacts/` into minikube at `/bench-artifacts`
+3. starts Dagster with `BENCH_BACKEND=k8s`
+
+Each ELMFIRE partition then runs as a pod (`kubectl get pods -l bench/block=elmfire`).
+Its outputs land in `artifacts/<workflow>/runs/<run>/model/prediction/` and its
+summary shows up as metadata on the `prediction` asset.
+
+Without Kubernetes: `BENCH_BACKEND=local BENCH_BLOCK_PYTHON=/path/to/python`
+(a Python with `images/elmfire/requirements.txt` installed) runs the same
+block as a subprocess.
+
+What a block receives and must produce: [`docs/block_contract.md`](docs/block_contract.md).
 
 ## How it fits together
 
@@ -28,12 +48,14 @@ blocks/*.yaml         one manifest per block: kind, requires/produces, params
 workflows/*.yaml      a workflow: case, input slots + sources + transforms,
                       models (lists = sweeps), reference, metrics
 submissions/          API stand-in: a run request = workflow + param overrides
+images/<block>/       real blocks: Dockerfile + entrypoint (the model adapter)
+docs/                 block contract
 src/bench/
   registry.py         loads blocks/ (blocks are data, not code)
   resolver.py         spec -> plan: params, auto reproject/regrid, sweeps,
                       comparison axes, skips with reasons
-  executor.py         the one place a block runs (dry run now; Dagster Pipes
-                      -> Kubernetes Job on NRP later)
+  executor.py         dry-run stand-in for blocks that aren't real yet
+  containers.py       runs real blocks via Dagster Pipes (k8s pod or subprocess)
   definitions.py      builds the Dagster graph from workflows/ + blocks/
   submit.py           validates and drops a submission (like POST /runs)
 ```
@@ -70,7 +92,8 @@ met are skipped, and the report says why.
 
 ## Not yet
 
-- Real execution (Pipes + Kubernetes Jobs on NRP, resources from manifests)
+- Real versions of the other blocks (LANDFIRE, weather, ignition, FARSITE, metrics)
+- NRP: same pods, with an NRP kube context, namespace and object storage instead of minikube mount
 - Object storage for artifacts (per-user private buckets)
 - The real API + CILogon; per-user isolation (open-source Dagster has no RBAC)
 - Bring-your-own data/model registration through the API
