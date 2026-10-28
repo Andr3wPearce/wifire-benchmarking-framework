@@ -9,7 +9,7 @@
 #
 # The WSTC server only ships dagster/pandas/numpy/requests/boto3 and has no compiler, so
 # the ELMFIRE step builds its own environment in the pod: uv -> CPython 3.12 -> the block's
-# pinned requirements + a pre-compiled pyretechnics wheel embedded below. That is the
+# pinned requirements + pre-compiled pyretechnics embedded below (xz, base85). That is the
 # stand-in for running the block's own image (ask: can steps use their own image?).
 import base64
 import json
@@ -29,8 +29,8 @@ WORK = Path(os.environ.get("BENCH_WORK", "/tmp/bench"))
 REQUIREMENTS = __REQUIREMENTS__
 BLOCK_SOURCE = __BLOCK_SOURCE__
 PREVIEW_SOURCE = __PREVIEW_SOURCE__
-WHEEL_NAME = "__WHEEL_NAME__"
-WHEEL_B64 = "__WHEEL_B64__"
+# pyretechnics compiled for CPython 3.12 / linux x86_64 (glibc >= 2.14): tar + xz + base85
+PKG_B85 = "__PKG_B85__"
 
 
 class ElmfireConfig(dg.Config):
@@ -92,10 +92,13 @@ def elmfire_synthetic(context: dg.AssetExecutionContext, config: ElmfireConfig, 
         want = sys.executable if sys.version_info[:2] == (3, 12) else "3.12"
         context.log.info(f"block environment: Python {'(server) ' + sys.version.split()[0] if want != '3.12' else '3.12 via uv'}")
         _sh(context, [uv, "venv", "--quiet", "--python", want, str(env_dir)])
-        wheel = WORK / WHEEL_NAME
-        wheel.write_bytes(base64.b64decode(WHEEL_B64))
-        _sh(context, [uv, "pip", "install", "--quiet", "--python", str(py), str(wheel),
-                      *REQUIREMENTS, "matplotlib<3.10"])
+        _sh(context, [uv, "pip", "install", "--quiet", "--python", str(py),
+                      *REQUIREMENTS, "scipy~=1.12.0", "sortedcontainers~=2.4.0", "matplotlib<3.10"])
+        site = _sh(context, [str(py), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"]).strip()
+        import io, lzma, tarfile
+        with tarfile.open(fileobj=io.BytesIO(lzma.decompress(base64.b85decode(PKG_B85)))) as t:
+            t.extractall(site)
+        context.log.info(f"pyretechnics (compiled) unpacked into {site}")
     # 2. the block, exactly as in images/elmfire, run standalone on a run.json
     (WORK / "elmfire_block.py").write_text(BLOCK_SOURCE)
     (WORK / "previews.py").write_text(PREVIEW_SOURCE)
