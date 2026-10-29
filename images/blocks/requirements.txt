@@ -1,4 +1,8 @@
-# Packages for every real block (images/core and images/elmfire), on top of the WSTC Dagster image.
+# Packages for every real block (images/core and images/elmfire), plus the WSTC server's Dagster.
+dagster==1.13.26
+dagster-k8s==0.29.26
+dagster-postgres==0.29.26
+pandas~=2.3.3            # what the server image has
 pyretechnics==2026.10.20
 numpy~=1.26.2          # pyretechnics breaks on NumPy 2
 rasterio~=1.4.3
