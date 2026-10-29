@@ -4,6 +4,8 @@
 #   apearce_image_override_job  whether a step can run in a different image: it asks for
 #                               docker.io/dagster/dagster-k8s:<same dagster version as the server>
 #                               via op_tags (the same mechanism as the resources example)
+#   apearce_image_negative_job  the decisive version: asks for busybox, which has no Python, so
+#                               the step can only succeed if the override is IGNORED
 # Reads only the pod's own environment. Never records secrets: no env dump, no tokens.
 import os
 import platform
@@ -17,6 +19,7 @@ import dagster as dg
 ME = "apearce"
 GROUP = f"{ME}_probe"
 OVERRIDE_IMAGE = f"docker.io/dagster/dagster-k8s:{dg.__version__}"
+NEGATIVE_IMAGE = "docker.io/library/busybox:1.36"
 SAFE_ENV = ["DAGSTER_CURRENT_IMAGE", "DAGSTER_HOME", "HOSTNAME", "PYTHONPATH"]
 
 
@@ -80,9 +83,19 @@ def probe_override_pod(context: dg.AssetExecutionContext) -> dict:
     return info
 
 
+@dg.asset(key_prefix=ME, group_name=f"{GROUP}_negative",
+          description=f"Asks for {NEGATIVE_IMAGE} (no Python): success means the override was ignored.",
+          op_tags={"dagster-k8s/config": {"container_config": {"image": NEGATIVE_IMAGE}}})
+def probe_negative_pod(context: dg.AssetExecutionContext) -> dict:
+    context.log.warning(f"asked for {NEGATIVE_IMAGE} but this ran in Python: override IGNORED")
+    return _describe(context)
+
+
 defs = dg.Definitions(
-    assets=[probe_default_pod, probe_override_pod],
+    assets=[probe_default_pod, probe_override_pod, probe_negative_pod],
     jobs=[dg.define_asset_job(f"{ME}_probe_job", selection=dg.AssetSelection.groups(GROUP)),
           dg.define_asset_job(f"{ME}_image_override_job",
-                              selection=dg.AssetSelection.groups(f"{GROUP}_override"))],
+                              selection=dg.AssetSelection.groups(f"{GROUP}_override")),
+          dg.define_asset_job(f"{ME}_image_negative_job",
+                              selection=dg.AssetSelection.groups(f"{GROUP}_negative"))],
 )
