@@ -8,10 +8,9 @@ params:
   lat: {type: float, default: null, rationale: WGS84 degrees}
   lon: {type: float, default: null, rationale: WGS84 degrees}
   time_utc: {type: str, default: null, rationale: ISO 8601 UTC; becomes minutes since the case t0}
-  source: {type: str, default: "", rationale: where the point comes from (shown in provenance)}
+  source: {type: str, default: "", rationale: where the point comes from (kept in provenance)}
 native:
-  crs: EPSG:4326          # the framework inserts a reproject step to the case CRS
+  crs: EPSG:4326                  # lat/lon in, so the resolver inserts a reproject step to the case CRS
 execution:
-  python: images/core/core_blocks.py
-  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
-image: registry.example/blocks/triangulated:0.2
+  code: images/core/core_blocks.py
+  image: core

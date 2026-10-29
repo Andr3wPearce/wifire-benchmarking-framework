@@ -1,5 +1,0 @@
-# pyretechnics is compiled against NumPy 1.26: NumPy 2 breaks it at import time.
-pyretechnics==2026.10.20
-numpy~=1.26.2
-rasterio~=1.4.3
-dagster-pipes>=1.10

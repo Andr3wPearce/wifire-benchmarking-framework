@@ -1,4 +1,4 @@
-# TEMP(wstc-minimal): the WSTC team's client (from Kai), vendored unchanged so the notebook runs anywhere.
+# The WSTC team's client (from Kai Lin), vendored unchanged so the notebook runs anywhere.
 """Use the WSTC Dagster from a Jupyter notebook (or any Python): upload code, run it, get results.
 
 Only needs `requests`. Talks to Dagster's GraphQL API at https://wstc-dagster.nrp-nautilus.io with

@@ -1,5 +1,9 @@
-"""Small display helpers for notebooks/red_sky.ipynb, so the notebook's cells read as the
-workflow, not as plumbing. Nothing here changes what runs."""
+"""Display helpers for notebooks/red_sky.ipynb.
+
+They keep the notebook's cells about the workflow rather than about formatting.
+Nothing here changes what runs; everything takes the compiled plan (bench.wstc) or
+what the WSTC client returns.
+"""
 from __future__ import annotations
 
 import base64
@@ -29,14 +33,14 @@ def show_file(path: Path, lang: str = "yaml") -> None:
 def plan_tables(cp: dict) -> None:
     """The compiled plan as three tables: input steps, runs, and what was skipped."""
     display(Markdown("**Input steps** (each is one asset, one pod)"))
-    display(md_table([{"slot": e["slot"], "step": e["name"], "block": e["block"],
-                       "kind": e["step"]["kind"], "real": "yes" if e["real"] else "dry run",
-                       "why inserted": e.get("reason") or ""} for e in cp["inputs"]]))
+    display(md_table([{"slot": e["slot"], "step": e["name"], "block": e["block"], "kind": e["kind"],
+                       "image": f"bench-{e['image']}", "why inserted": e.get("reason") or ""}
+                      for e in cp["inputs"]]))
     if cp["reference"]:
         display(Markdown(f"**Reference:** `{cp['reference']['block']}` (the observed perimeter)"))
     display(Markdown(f"**Runs** ({len(cp['runs'])}; each is one partition of `prediction`)"))
     display(md_table([{"run": k, "model": r["model"], "params": r["params"],
-                       "inputs": r["inputs"] or "-", "real": "yes" if r["real"] else "dry run"}
+                       "inputs": r["inputs"] or "-", "image": f"bench-{r['image']}"}
                       for k, r in sorted(cp["runs"].items())]))
     if cp["skipped"]:
         display(Markdown("**Skipped** (the resolver explains why)"))
@@ -57,24 +61,23 @@ def mermaid(cp: dict) -> Markdown:
         return nid
 
     for e in cp["inputs"]:
-        node(tuple(e["key"]), f"{e['slot']}<br/>{e['block']}", "real" if e["real"] else "dry")
+        node(tuple(e["key"]), f"{e['slot']}<br/>{e['block']}", "step")
         for d in e["deps"]:
             lines.append(f"  {ids[tuple(d)]} --> {ids[tuple(e['key'])]}")
     tails = [tuple(e["key"]) for e in cp["inputs"]
              if not any(tuple(e["key"]) == tuple(d) for o in cp["inputs"] for d in o["deps"])]
-    pred = node("prediction", f"prediction<br/>{len(cp['runs'])} runs", "real")
+    pred = node("prediction", f"prediction<br/>{len(cp['runs'])} runs", "step")
     for t in tails:
         lines.append(f"  {ids[t]} --> {pred}")
-    ref = node("reference", "reference<br/>final perimeter", "real") if cp["reference"] else None
-    rep = node("report", "report", "real")
+    ref = node("reference", "reference<br/>final perimeter", "step") if cp["reference"] else None
+    rep = node("report", "report", "step")
     for m in cp["metrics"]:
-        s = node(f"score/{m}", f"score<br/>{m}", "real")
+        s = node(f"score/{m}", f"score<br/>{m}", "step")
         lines.append(f"  {pred} --> {s}")
         if ref:
             lines.append(f"  {ref} --> {s}")
         lines.append(f"  {s} --> {rep}")
-    lines += ["  classDef real fill:#fde3c8,stroke:#c2410c,color:#111",
-              "  classDef dry fill:#eee,stroke:#999,color:#555,stroke-dasharray:4 3"]
+    lines += ["  classDef step fill:#fde3c8,stroke:#c2410c,color:#111"]
     src = "\n".join(lines)
     link = "https://mermaid.live/view#base64:" + base64.urlsafe_b64encode(
         ('{"code":' + __import__("json").dumps(src) + ',"mermaid":{"theme":"default"}}').encode()).decode()

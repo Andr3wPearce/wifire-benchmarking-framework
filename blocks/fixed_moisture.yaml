@@ -1,16 +1,17 @@
 name: fixed_moisture
 kind: source
 slot: moisture
+description: >
+  A fixed fuel-moisture scenario. Classes not given here get the model
+  adapter's defaults, which the adapter reports.
 produces:
 - fuel_moisture
 params:
   dead_1h:
     type: float
     default: 0.06
-    range:
-    - 0.02
-    - 0.35
+    range: [0.02, 0.35]
+    rationale: fraction (kg water / kg dry fuel)
 execution:
-  python: images/core/core_blocks.py
-  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
-image: registry.example/blocks/fixed-moisture:0.1
+  code: images/core/core_blocks.py
+  image: core

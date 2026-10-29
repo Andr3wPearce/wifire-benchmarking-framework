@@ -1,12 +1,17 @@
 [project]
 name = "bench"
-version = "0.1.0"
-description = "Composable wildfire spread-model benchmarking framework (SCIL), Dagster prototype"
-requires-python = ">=3.10,<3.14"
-dependencies = ["dagster>=1.10", "dagster-webserver>=1.10", "pyyaml", "rasterio>=1.4", "numpy", "matplotlib"]
+version = "0.2.0"
+description = "Composable wildfire spread-model benchmarking framework (SCIL, AI Collaborative for Wildfire WS2)"
+requires-python = ">=3.10"
+# what the notebook needs to plan, compile and push a workflow; the blocks' own
+# packages live in their images (images/wstc/*/requirements.txt)
+dependencies = ["pyyaml", "requests", "ipython"]
 
 [project.optional-dependencies]
-k8s = ["dagster-k8s"]      # run real blocks as Kubernetes pods (minikube locally, NRP later)
+# to run tests/test_blocks.py locally (the ELMFIRE image's packages)
+blocks = ["numpy~=1.26.2", "rasterio~=1.4.3", "matplotlib<3.10", "pyretechnics==2026.10.20"]
+test = ["pytest", "dagster==1.13.26"]
+notebook = ["jupyterlab"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -15,6 +20,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.dagster]
-module_name = "bench.definitions"
-code_location_name = "benchmarking"
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+filterwarnings = ["ignore::PendingDeprecationWarning"]

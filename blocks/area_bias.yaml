@@ -1,9 +1,9 @@
 name: area_bias
 kind: metric
-needs:
+description: (predicted - observed) / observed burned area (0 = perfect, -0.5 = half the observed area).
+needs:                            # a prediction and the reference, both as burned area
 - perimeter
 - perimeter
 execution:
-  python: images/core/core_blocks.py
-  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
-image: registry.example/blocks/metrics:0.3
+  code: images/core/core_blocks.py
+  image: core

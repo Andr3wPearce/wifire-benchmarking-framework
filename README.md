@@ -1,112 +1,116 @@
-# Benchmarking framework (Dagster prototype)
+# Wildfire spread-model benchmarking framework
 
-A composable framework for benchmarking wildfire spread models: you pick
-**building blocks** in a config file, and the orchestrator handles the rest.
-**ELMFIRE (pyretechnics) is the first real block**: it runs in its own
-container on Kubernetes (minikube locally). Every other block is still a
-**dry run** that logs what it would do and writes its provenance record;
-until the input blocks are real, ELMFIRE runs on a synthetic test landscape
-and says so in its output.
+SCIL, AI Collaborative for Wildfire, Workstream 2.
 
-## Run it
+A framework for comparing wildfire spread models fairly: the same fire, the same
+inputs, the same conventions, scored the same way, with a record of how every
+number was produced. You describe an experiment in a **workflow** file; the
+framework plans it, runs every step on the WSTC Dagster at NRP, reuses anything
+that was already computed, and scores each model run against the observed fire.
 
-**macOS:** double-click **`Start Dagster.command`** (first time: right-click > Open, since it is an unsigned script). **Windows:** double-click **`Start Dagster.bat`** (runs inside WSL). Either one sets up Python + Dagster
-(first run: a few minutes), submits a first run, and opens
-<http://localhost:3070> (set `BENCH_PORT` to change it). Keep the window open; closing it stops Dagster.
+The end-to-end example is [`notebooks/red_sky.ipynb`](notebooks/red_sky.ipynb):
+the Hughes Fire (January 2025) with real LANDFIRE fuels, station wind, two
+ignition sources and ELMFIRE, scored against the final perimeter.
 
-Every workflow's runs, as written, are planned when Dagster loads it: open the
-workflow's `__runs` group and **Materialize** (pick partitions, or use an asset's
-Lineage tab > Upstream > All > Materialize all). Nothing runs by itself.
+## The idea in four parts
 
-For overrides and sweeps on top of a workflow, submit from a terminal in this folder
-(WSL on Windows). Missing inputs run first, then the runs, as one backfill:
-
-```bash
-scripts/submit.sh                                    # lists workflows
-scripts/submit.sh hughes_ignition_comparison --set elmfire.duration_min=480
-scripts/submit.sh hughes_ignition_comparison --set farsite.spread_adjustment="[0.8, 1.0]"   # a sweep
-```
-
-## Composing a workflow
-
-Copy `workflows/hughes_ignition_comparison.yaml` to `workflows/<your_name>.yaml`
-(the **file name is the workflow's name**), edit the blocks and params, and
-relaunch Dagster (a new workflow is a new graph). A workflow file with a mistake
-is skipped with its error in the launcher window; the others still load.
-
-## Real blocks on minikube
-
-Needs `minikube` running (`minikube start`). The launcher then:
-
-1. builds `bench/elmfire:0.1` into minikube if it isn't there
-   (`scripts/build_blocks.sh`; the first build compiles pyretechnics)
-2. mounts `artifacts/` into minikube at `/bench-artifacts`
-3. starts Dagster with `BENCH_BACKEND=k8s`
-
-Each ELMFIRE partition then runs as a pod (`kubectl get pods -l bench/block=elmfire`).
-Its outputs land in `artifacts/<workflow>/runs/<run>/model/prediction/` and its
-summary shows up as metadata on the `prediction` asset.
-
-Without Kubernetes: `BENCH_BACKEND=local BENCH_BLOCK_PYTHON=/path/to/python`
-(a Python with `images/elmfire/requirements.txt` installed) runs the same
-block as a subprocess.
-
-What a block receives and must produce: [`docs/block_contract.md`](docs/block_contract.md).
-
-## How it fits together
-
-```
-blocks/*.yaml         one manifest per block: kind, requires/produces, params
-                      (defaults, ranges, rationale), native CRS/resolution, image
-workflows/*.yaml      a workflow: case, input slots + sources + transforms,
-                      models (lists = sweeps), reference, metrics
-submissions/          API stand-in: a run request = workflow + param overrides
-images/<block>/       real blocks: Dockerfile + entrypoint (the model adapter)
-docs/                 block contract
-src/bench/
-  registry.py         loads blocks/ (blocks are data, not code)
-  resolver.py         spec -> plan: params, auto reproject/regrid, sweeps,
-                      comparison axes, skips with reasons
-  executor.py         dry-run stand-in for blocks that aren't real yet
-  containers.py       runs real blocks via Dagster Pipes (k8s pod or subprocess)
-  definitions.py      builds the Dagster graph from workflows/ + blocks/
-  submit.py           validates and drops a submission (like POST /runs)
-```
-
-What Dagster shows for each workflow:
-
-| Group | Assets |
-|---|---|
-| `<wf>__landscape`, `__weather`, `__moisture`, `__ignition` | one asset per input step (fetch -> auto reproject/regrid -> transforms); WindNinja depends on the LANDFIRE fetch because its manifest says it needs elevation |
-| `<wf>__reference` | the observed reference |
-| `<wf>__runs` | `prediction` and one `score/<metric>` per metric, **partitioned by run** (model x params x input choice), plus `report` |
-
-**Submitting a run:** the sensor resolves the submission, adds new run
-partitions, materializes only the inputs that are missing, and lets
-automation run each new partition once its inputs exist. Runs with the
-same identity are reused, not recomputed. Bad params are rejected; params
-outside their usual range are a warning; models whose requirements aren't
-met are skipped, and the report says why.
-
-## Extending it
-
-| You want to add | You do | Redeploy? |
+| Part | Where | What it is |
 |---|---|---|
-| a model, source, transform or metric | add `blocks/<name>.yaml` (+ image) and use it in a workflow | no code changes |
-| a new fire / case | add a workflow file | reload code location |
-| a different param value or sweep | submit with `--set` | no |
-| a new block *kind* or input *slot* | framework change | yes |
+| **Blocks** | `blocks/*.yaml` | One manifest per model, data source, transform, reference or metric: what it consumes and produces, its parameters (types, defaults, ranges, rationale), and where its code and image are. Adding a model is adding a block. ([blocks/README.md](blocks/README.md)) |
+| **Workflows** | `workflows/*.yaml` | An experiment, as configuration: a case (fire, grid, time window), sources per input slot, models, a reference and metrics. Several sources for a slot make a comparison axis; a list of parameter values makes a sweep. |
+| **Conventions** | `docs/conventions.md` | One answer to every question models disagree on (orientation, wind direction, units, time, grid). Sources convert into them, model adapters convert out of them, and every artifact is checked against them before it is accepted. |
+| **Identity** | `src/bench/wstc.py` | Every artifact is stored under a hash of everything that determines it. Finished work is reused across runs and workflows, and changing anything that matters changes the hash, so nothing stale is ever served. |
+
+## From workflow to results
+
+```
+workflows/hughes_red_sky.yaml
+        │  bench.workflows.load_spec      (checks the file's sections and case)
+        ▼
+spec ──▶ bench.resolver.resolve           (registry checks, defaults, auto reproject steps,
+        │                                  sweeps x comparison axes -> runs, skips with reasons)
+        ▼
+plan ──▶ bench.wstc.compile_plan          (asset keys, identities, artifact paths, images)
+        │  bench.wstc.build_workflow_file
+        ▼
+<me>_<workflow>.py ──▶ d.upload()  (deploy/wstc/dagster_client.py)
+        │
+        ▼  on the WSTC Dagster: one pod per step, each started from its block's image
+inputs job ──▶ runs job (one partition per run) ──▶ report job
+```
+
+What a workflow becomes in Dagster (all keys under `<me>/<workflow>/`):
+
+| Asset | Is |
+|---|---|
+| `<slot>/<source>/<step>` | one per input step: the source's fetch, any automatic reproject, then the slot's transforms |
+| `reference/<block>` | the observed perimeter, rasterized onto the case grid |
+| `prediction` | **partitioned**, one partition per run (model x params x input choices); Dagster charts any numeric metadata across partitions |
+| `score/<metric>` | partitioned like `prediction` |
+| `report` | every finished run's scores in one table, plus the skipped runs and why |
+
+## Repository
+
+```
+blocks/              block manifests (+ README: the manifest fields)
+workflows/           workflows; hughes_red_sky.yaml is the Red Sky example
+references/          observed perimeters the workflows score against (GeoJSON)
+images/core/         the Python-only blocks: LANDFIRE, roads override, station wind,
+                     moisture, ignition points, reproject, reference, IoU, area bias
+images/elmfire/      the ELMFIRE adapter (pyretechnics)
+images/wstc/         one image recipe per block family (core, elmfire), FROM the
+                     server's Dagster version; pushed to Docker Hub
+src/bench/
+  registry.py        loads blocks/
+  workflows.py       loads and checks workflow files
+  resolver.py        workflow -> plan
+  conventions.py     the case grid and the machine-checkable conventions
+  previews.py        the prediction preview image (same look for every model)
+  wstc.py            plan -> one uploadable file for the WSTC Dagster; identities; images
+  notebook.py        display helpers for the notebook
+deploy/wstc/         template_workflow.py (what a compiled workflow looks like) and
+                     the WSTC team's client
+notebooks/           red_sky.ipynb
+docs/                conventions, block contract, what is still temporary
+scripts/             build_wstc_image.sh (build + push the images), list_temporary.sh
+tests/               test_framework.py (resolver, identity, compile), test_blocks.py
+                     (every block on a synthetic landscape)
+```
+
+## Running it
+
+1. **Images** (only when `images/wstc/*` changes): with Docker Desktop running and
+   `docker login`, run `scripts/build_wstc_image.sh`. It pushes
+   `a3pearce/bench-core:<tag>` and `a3pearce/bench-elmfire:<tag>`; the tag is a hash
+   of the recipe, and the compiler names the same tag. Both repos must be public.
+2. **The notebook**: `jupyter lab notebooks/red_sky.ipynb` from a Python with
+   `pip install -e .`, then run top to bottom. It asks for the WSTC dashboard
+   password and an email for LANDFIRE's service (a run tag, not stored in code).
+3. **The reference perimeter** goes in `references/hughes_final_perimeter.geojson`
+   (any CRS, as long as the GeoJSON says which; WGS84 if it doesn't). Without it the
+   runs still run; scores say there is no reference.
+
+## Adding things
+
+| You want to add | You do |
+|---|---|
+| a model | a manifest with `execution` (code + image family), an adapter that follows the model contract (docs/block_contract.md), an image recipe in `images/wstc/<family>/` |
+| a data source, transform or metric | a manifest, and a function in `images/core/core_blocks.py` (or its own image if it needs other packages) |
+| a fire | a workflow file (and its reference perimeter) |
+| a sweep or a comparison | a list of values, or a second source for a slot, in the workflow |
 
 ## Tests
 
 ```bash
-~/.bench-framework/venv/bin/pytest -q
+pip install -e ".[blocks,test]"
+pytest -q
 ```
+
+`test_blocks.py` needs the blocks' packages (rasterio, pyretechnics with NumPy 1.26)
+and is skipped without them.
 
 ## Not yet
 
-- Real versions of the other blocks (LANDFIRE, weather, ignition, FARSITE, metrics)
-- NRP: same pods, with an NRP kube context, namespace and object storage instead of minikube mount
-- Object storage for artifacts (per-user private buckets)
-- The real API + CILogon; per-user isolation (open-source Dagster has no RBAC)
-- Bring-your-own data/model registration through the API
+See [docs/TEMPORARY.md](docs/TEMPORARY.md). In short: finished artifacts move to the
+S3 bucket; many fires become a second partition dimension (a case catalog); FARSITE,
+WindNinja and WRF-Fire get implementations; the NGFS ignition gets its real point.

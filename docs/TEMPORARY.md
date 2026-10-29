@@ -1,22 +1,25 @@
-# Temporary code (remove before deployment)
+# What is still temporary
 
-This is the deployment repo. Anything that exists only for local testing or
-as a stand-in is tagged in the code so it can't be forgotten:
+Anything that exists as a stand-in is tagged in the code with `TEMP(<tag>)`, so it
+can't be forgotten:
 
 ```bash
 scripts/list_temporary.sh     # lists every tag; exits non-zero while any remain
 ```
 
-Tag new temporary code the same way: a comment containing `TEMP(<tag>)` on
-the line (or the docstring's first line). Use an existing tag if one fits.
+Tag new temporary code the same way, on the line (or the comment above it).
 
-| Tag | Means | Goes away when |
+| Tag | What | Goes away when |
 |---|---|---|
-| `TEMP(dry-run)` | a block that only writes a provenance receipt, or code that works around such blocks (e.g. ELMFIRE's synthetic test landscape) | every block in the workflow has a real image; then delete `executor.py` and the dry-run branches |
-| `TEMP(local-dev)` | laptop-only plumbing: `dagster dev`, minikube (mount, in-cluster image builds, `imagePullPolicy: Never`, resource caps), the local subprocess backend, double-click launchers | deployment on NRP: Dagster via Helm, images from a registry, artifacts in object storage / a PVC, manifest resources as-is |
-| `TEMP(api-stand-in)` | `submissions/` folder + sensor + `bench.submit` standing in for the API | the API creates partitions and launches runs directly |
-| `TEMP(wstc-minimal)` | running on the WSTC Dagster as uploaded single files (`deploy/wstc/`, `src/bench/wstc.py`, `scripts/build_wstc_minimal.py`, `wheels/`): a shared Python environment on the volume (built by `<me>_bench_env_job` from an embedded pyretechnics wheel) stands in for block images; probes; the vendored `dagster_client.py` | steps can use the block's own image (or the server image has our package), and the framework's real assets run on WSTC |
-| placeholder (`registry.example/...`) | made-up image names in block manifests | each block gets a real image in the lab's registry |
+| `TEMP(placeholder-data)` | the NGFS ignition in `hughes_red_sky.yaml` is the CAL FIRE reported origin again, so the two ELMFIRE runs are identical | we have the NGFS first-detection point and time |
+| `TEMP(shared-volume)` | artifacts live on the WSTC shared volume (`/opt/dagster/shared/storage/<me>/bench`): not backed up, 10 GiB shared by all users, anyone with the dashboard password can overwrite it | finished artifacts are written to the S3 bucket (`wstc-dagster`, credentials already in every step pod) under the same identity paths |
 
-Not temporary, even though they help with testing: `docs/conventions.md`
-checks, tests under `tests/`, the cache/identity logic, `docs/block_contract.md`.
+## Known limits (not tagged, by design for now)
+
+| Limit | Why | Next |
+|---|---|---|
+| One fire per workflow | the case is part of the workflow | a case catalog, with the fire as a second partition dimension |
+| `prediction` is one asset, so one image | Dagster sets a step's image per asset, not per partition | one prediction asset per model once there are two real models (the compiler refuses to mix images today) |
+| Runs are launched from the notebook | there is no API yet | the API creates partitions and launches runs |
+| FARSITE, WindNinja, WRF-Fire have manifests only | not implemented | the resolver skips such models with the reason, and refuses such inputs |
+| Station wind is uniform over the domain | no WindNinja | gridded wind (the ELMFIRE adapter already reads it) |

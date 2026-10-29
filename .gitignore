@@ -1,10 +1,10 @@
 .venv/
 __pycache__/
 *.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+deploy/wstc/build/
+# left over from the removed local (minikube) path
 artifacts/
 .dagster_home/
-submissions/*.yaml
-!submissions/.gitkeep
-.DS_Store
-deploy/wstc/*_bench_minimal.py
-deploy/wstc/build/

@@ -1,9 +1,9 @@
 name: iou
 kind: metric
-needs:
+description: Intersection over union of predicted and observed burned area (1 = perfect).
+needs:                            # a prediction and the reference, both as burned area
 - perimeter
 - perimeter
 execution:
-  python: images/core/core_blocks.py
-  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
-image: registry.example/blocks/metrics:0.3
+  code: images/core/core_blocks.py
+  image: core

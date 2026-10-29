@@ -1,10 +1,12 @@
 name: windninja
 kind: transform
+description: >
+  WindNinja mass-conserving wind downscaling: station wind + terrain -> gridded
+  wind. Not implemented yet.
 consumes:
 - surface_wind
 - elevation
 produces:
 - gridded_wind
 needs_from_slots:
-  elevation: landscape
-image: registry.example/blocks/windninja:3.11
+  elevation: landscape            # its elevation comes from the landscape slot, not the weather chain

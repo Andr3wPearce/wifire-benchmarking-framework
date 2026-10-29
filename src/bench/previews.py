@@ -4,13 +4,15 @@ Rendered by the framework (not by each model block) so every model's output is
 drawn the same way: same colour maps, same fixed scales, same layout. That is
 what makes previews of different partitions comparable at a glance.
 
-Also written next to the rasters as preview.png.
+Written next to the rasters as preview.png; the framework attaches it to the
+`prediction` asset's metadata. Runs inside a model's image (needs matplotlib, rasterio):
+    python previews.py <prediction dir> <duration_min>
 """
 from __future__ import annotations
 
-import base64
 import io
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -71,6 +73,7 @@ def render_prediction(pred_dir: Path, duration_min: float | None = None) -> tupl
     return png, out
 
 
-def preview_markdown(png: bytes) -> str:
-    """Markdown with the image inline: Dagster shows it on the materialization."""
-    return f"![prediction preview](data:image/png;base64,{base64.b64encode(png).decode()})"
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        sys.exit("usage: python previews.py <prediction dir> <duration_min>")
+    render_prediction(Path(sys.argv[1]), float(sys.argv[2]) or None)

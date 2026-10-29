@@ -1,11 +1,16 @@
-"""Machine-checkable parts of docs/conventions.md.
+"""Machine-checkable parts of docs/conventions.md, and the case grid itself.
 
-`check_raster` is run by the framework on every real block's inputs and
-outputs. A violation fails the step: better to stop than to compare models
-that saw differently oriented or scaled data.
+Every step on WSTC runs `check_dir` on what its block wrote, before the artifact is
+accepted. A violation fails the step: better to stop than to compare models that saw
+differently oriented, gridded or scaled data.
+
+Runs inside the blocks' images (needs rasterio), as `python conventions.py <dir> <case.json>`.
 """
 from __future__ import annotations
 
+import json
+import math
+import sys
 from pathlib import Path
 
 ORIENTATION = "north-up: row 0 = north edge, col 0 = west edge, transform origin = (min x, max y)"
@@ -26,7 +31,24 @@ VALUE_RANGES = {
     "fireline_intensity": (0.0, 1e6),
     "spread_rate": (0.0, 1e4),
     "flame_length": (0.0, 500.0),
+    "burned": (0, 1),
 }
+
+
+def case_grid(case: dict):
+    """(transform, (rows, cols)) of the case grid: the case's WGS84 domain projected to the
+    case CRS and snapped outward to whole cells, north-up (docs/conventions.md, section 1).
+    Every raster that crosses a block boundary sits on exactly this grid."""
+    from rasterio.transform import from_origin
+    from rasterio.warp import transform_bounds
+
+    w, s, e, n = case["domain_wgs84"]
+    left, bottom, right, top = transform_bounds("EPSG:4326", case["crs"], w, s, e, n, densify_pts=21)
+    res = float(case["resolution_m"])
+    left, bottom = math.floor(left / res) * res, math.floor(bottom / res) * res
+    right, top = math.ceil(right / res) * res, math.ceil(top / res) * res
+    shape = (int(round((top - bottom) / res)), int(round((right - left) / res)))
+    return from_origin(left, top, res, res), shape
 
 
 def check_raster(path: Path, case: dict) -> list[str]:
@@ -49,6 +71,11 @@ def check_raster(path: Path, case: dict) -> list[str]:
         res = case.get("resolution_m")
         if res and (abs(abs(t.a) - res) > 1e-6 or abs(abs(t.e) - res) > 1e-6):
             problems.append(f"{name}: resolution {abs(t.a)} x {abs(t.e)} m != case grid {res} m")
+        if case.get("domain_wgs84"):
+            grid, shape = case_grid(case)
+            if (src.height, src.width) != shape or abs(t.c - grid.c) > 1e-3 or abs(t.f - grid.f) > 1e-3:
+                problems.append(f"{name}: {src.height}x{src.width} cells at origin ({t.c:.0f}, {t.f:.0f}) "
+                                f"!= case grid {shape[0]}x{shape[1]} at ({grid.c:.0f}, {grid.f:.0f})")
         if name in VALUE_RANGES:
             data = src.read(1, masked=True).astype("float64").filled(np.nan)
             finite = data[np.isfinite(data)]
@@ -78,4 +105,14 @@ def _crs_problems(name: str, crs, case_crs: str) -> list[str]:
 
 
 def check_dir(d: Path, case: dict) -> list[str]:
+    """Violations in every GeoTIFF in a directory (an artifact)."""
     return [p for f in sorted(Path(d).glob("*.tif")) for p in check_raster(f, case)]
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        sys.exit("usage: python conventions.py <artifact dir> <case.json>")
+    problems = check_dir(Path(sys.argv[1]), json.loads(Path(sys.argv[2]).read_text()))
+    for p in problems:
+        print(p)
+    sys.exit(1 if problems else 0)

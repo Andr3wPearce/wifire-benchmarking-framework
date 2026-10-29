@@ -2,16 +2,16 @@ name: station_wind
 kind: source
 slot: weather
 description: >
-  Hourly 10 m wind from the nearest ASOS station (Iowa Environmental Mesonet),
-  uniform over the domain. Rotates directions from true to grid north itself, so
-  it hands over canonical data directly (no reproject step).
+  Hourly 10 m wind from the nearest ASOS station that has data for the case
+  window (Iowa Environmental Mesonet), uniform over the domain. The block
+  rotates directions from true north to grid north itself, so it hands over
+  canonical data directly (no reproject step).
 produces:
 - surface_wind
 params:
   station: {type: str, default: "", rationale: "IEM station id (e.g. SDB); empty = nearest with data"}
-  network: {type: str, default: CA_ASOS}
+  network: {type: str, default: CA_ASOS, rationale: IEM network to search}
   max_km: {type: float, default: 80, rationale: farthest station considered}
 execution:
-  python: images/core/core_blocks.py
-  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
-image: registry.example/blocks/station-wind:0.3
+  code: images/core/core_blocks.py
+  image: core

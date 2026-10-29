@@ -1,34 +1,46 @@
-# Minimal run on the WSTC Dagster (NRP)  (TEMP(wstc-minimal))
+# Running on the WSTC Dagster (NRP)
 
-One job, two steps (each its own pod):
+The WSTC Dagster (<https://wstc-dagster.nrp-nautilus.io>) is a shared Dagster
+server run by Kai Lin's team on NRP Nautilus. Users upload Python files through
+a system job; every step runs in its own Kubernetes pod.
 
-| Step | Does |
+What matters for us:
+
+| | |
 |---|---|
-| `<me>/env_check` | reports the pod: Python, arch, compiler, network to PyPI/GitHub |
-| `<me>/elmfire_synthetic` | builds a Python 3.12 env in the pod (uv + embedded pyretechnics wheel), runs the real ELMFIRE block on the synthetic landscape, records its summary + a preview image |
+| Uploads | one `.py` per upload (max 5 MB); same name replaces; prefix everything with your short name (`apearce`) |
+| Step pods | the server's standard image unless a step asks for its own via `op_tags` (`dagster-k8s/config` → `container_config.image`), which is what we do |
+| Images | must carry dagster 1.13.26 / dagster-k8s 0.29.26; NRP pulls from public Docker Hub repos |
+| Storage | shared volume at `/opt/dagster/shared/storage/<me>/` (CephFS, 10 GiB for everyone, not backed up); S3 bucket `wstc-dagster` with credentials in every pod |
+| Limits | 4 runs at once across all users, 8 step pods per run, resource limits within 20% of requests |
+| Network | step pods reach PyPI, GitHub, Docker Hub, LANDFIRE (lfps.usgs.gov) and the Iowa Mesonet |
 
-## Build the file (only after changing the block or previews)
-```bash
-python scripts/build_wstc_minimal.py --me apearce \
-  --wheel wheels/pyretechnics-2026.10.20-cp312-cp312-linux_x86_64.slim.whl
-# -> deploy/wstc/apearce_bench_minimal.py  (generated, not committed)
-```
+## Files here
 
-## Run it from NRP JupyterHub
-Put `apearce_bench_minimal.py` next to `dagster_client.py`, then:
+| File | |
+|---|---|
+| `template_workflow.py` | what a compiled workflow looks like; `bench.wstc.build_workflow_file` fills it in |
+| `dagster_client.py` | the WSTC team's client (upload, run, results, logs, remove), vendored unchanged |
+
+Compiled files go to `deploy/wstc/build/` (not committed). The notebook
+(`notebooks/red_sky.ipynb`) compiles, uploads and runs; from plain Python:
+
 ```python
-import getpass
+import getpass, sys
+sys.path[:0] = ["src", "deploy/wstc"]
+from bench import wstc
 from dagster_client import Dagster
-d = Dagster(password=getpass.getpass("Dagster password: "))
 
-d.upload("apearce_bench_minimal.py")          # -> job list incl. apearce_bench_minimal_job
-run_id, status, results = d.run(
-    "apearce_bench_minimal_job",
-    run_config={"ops": {"apearce__elmfire_synthetic": {"config": {"duration_min": 180.0}}}})
-print(status, d.url_for(run_id))
-results                                       # env_check + ELMFIRE summary
+d = Dagster(password=getpass.getpass())
+path, cp = wstc.build_workflow_file("workflows/hughes_red_sky.yaml", "apearce", "deploy/wstc/build",
+                                    wstc.image_refs("a3pearce"))
+d.upload(str(path))
+jobs = wstc.job_names("apearce", cp["workflow"])
+d.run(jobs["inputs"], tags={"bench/lfps_email": "you@ucsd.edu"})
+for key in cp["runs"]:
+    d.run(jobs["runs"], tags={"dagster/partition": key})
+d.run(jobs["report"])
 ```
-If it fails: `d.errors(run_id)`, `d.logs(run_id)`.
 
-First run is slow (~2-4 min): pods start, uv installs Python 3.12 and the block's
-packages. The preview shows in the dashboard: Assets > apearce/elmfire_synthetic.
+If a run fails: `d.errors(run_id)`, `d.logs(run_id)`, or the run's page
+(`d.url_for(run_id)`).

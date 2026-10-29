@@ -1,20 +1,20 @@
-"""ELMFIRE model block (pyretechnics), the first block that does real work.
+"""ELMFIRE model block: the adapter between the framework and SIG's pyretechnics.
 
 The framework hands this block a run directory containing `run.json` (see
-docs/block_contract.md). The block is the model's *adapter*:
+docs/block_contract.md, "Model contract"). The adapter does three things:
 
-    prepare  canonical inputs (GeoTIFFs in SI units) -> pyretechnics space-time cubes
+    prepare  canonical inputs (GeoTIFFs and JSON in SI units, north-up, case grid)
+             -> pyretechnics space-time cubes
     run      pyretechnics.eulerian_level_set.spread_fire_with_phi_field
-    collect  pyretechnics outputs -> canonical Prediction (rasters + perimeter GeoJSON)
+    collect  pyretechnics outputs -> canonical Prediction (rasters + perimeter GeoJSON
+             + summary.json) in run_dir/prediction/
 
-Inputs that upstream blocks have not produced for real yet (they are still dry
-runs) are filled from a synthetic test landscape, and the run says so loudly in
-its output and metadata.
+Everything model-specific stays in here, never upstream: pyretechnics puts row 0 at
+the SOUTH edge (so every grid is flipped in and out), wants wind in km/h, and calls
+the wind's "from" direction `upwind_direction`.
 
-Runs two ways:
-  * under Dagster Pipes (inside the Kubernetes Job, or a local subprocess):
-    context comes from Dagster, metadata and logs flow back to the UI
-  * standalone, for debugging:  python elmfire_block.py <run_dir>
+Dependencies: pyretechnics (NumPy 1.26), rasterio (images/wstc/elmfire).
+Runs standalone for debugging:  python elmfire_block.py <run_dir>
 """
 from __future__ import annotations
 
@@ -27,7 +27,6 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from rasterio.features import shapes
-from rasterio.transform import from_origin
 
 import pyretechnics.eulerian_level_set as els
 import pyretechnics.fuel_models as fm
@@ -40,43 +39,6 @@ MOISTURE_DEFAULTS = {
     "live_herbaceous": 0.60, "live_woody": 0.90, "foliar": 1.00,
 }
 CANOPY_LAYERS = ["canopy_cover", "canopy_height", "canopy_base_height", "canopy_bulk_density"]
-
-
-# --------------------------------------------------------------------------- #
-# TEMP(dry-run): synthetic fixture (stand-in until LANDFIRE / weather / ignition blocks are real)
-# --------------------------------------------------------------------------- #
-def make_synthetic_inputs(d: Path, size: int = 200, cell_m: float = 30.0, crs: str = "EPSG:5070") -> dict:
-    """A 6 x 6 km test landscape: grass/grass-shrub with a timber-understory
-    patch and a road, a gentle hill, a steady SW wind, one ignition point."""
-    d.mkdir(parents=True, exist_ok=True)
-    rng = np.random.default_rng(42)
-    yy, xx = np.mgrid[0:size, 0:size]
-    fuel = np.where(rng.random((size, size)) < 0.7, 102, 121).astype("int16")      # GR2 / GS1
-    fuel[(yy - 60) ** 2 + (xx - 140) ** 2 < 35 ** 2] = 165                          # TU5 patch
-    fuel[:, 95:98] = 91                                                             # NB1 road
-    elev = 400 + 120 * np.exp(-(((yy - 120) / 60.0) ** 2 + ((xx - 70) / 60.0) ** 2))
-    in_tu = fuel == 165
-    layers = {
-        "fuel_model_fbfm40": fuel,
-        "elevation": elev.astype("float32"),
-        "canopy_cover": np.where(in_tu, 0.5, 0.0).astype("float32"),
-        "canopy_height": np.where(in_tu, 15.0, 0.0).astype("float32"),
-        "canopy_base_height": np.where(in_tu, 2.0, 0.0).astype("float32"),
-        "canopy_bulk_density": np.where(in_tu, 0.12, 0.0).astype("float32"),
-        "wind_speed_10m": np.full((size, size), 6.0, "float32"),        # m/s
-        "wind_from_direction": np.full((size, size), 225.0, "float32"),  # deg, from SW
-    }
-    transform = from_origin(-2_000_000.0, 2_000_000.0, cell_m, cell_m)
-    for name, arr in layers.items():
-        _write_tif(d / f"{name}.tif", arr, transform, crs)
-    (d / "fuel_moisture.json").write_text(json.dumps({"dead_1h": 0.06}))
-    cy, cx = 150, 40
-    x, y = transform * (cx + 0.5, cy + 0.5)
-    (d / "ignition.geojson").write_text(json.dumps({
-        "type": "FeatureCollection", "crs": crs,
-        "features": [{"type": "Feature", "properties": {"time_min": 0},
-                      "geometry": {"type": "Point", "coordinates": [x, y]}}]}))
-    return {"landscape": str(d), "weather": str(d), "moisture": str(d), "ignition": str(d)}
 
 
 def _write_tif(path: Path, arr: np.ndarray, transform, crs: str, nodata=None) -> None:
@@ -98,16 +60,10 @@ def _read(path: Path) -> tuple[np.ndarray, dict]:
 def prepare(run: dict, log) -> dict:
     """Canonical inputs -> pyretechnics cubes. Returns everything `run_model` needs."""
     params = run["params"]
-    work = Path(run["run_dir"])
-    inputs = dict(run.get("inputs", {}))
-    # TEMP(dry-run): fill slots whose upstream blocks are still receipts
-    fixture_slots = [s for s in ("landscape", "weather", "moisture", "ignition")
-                     if not _is_real(inputs.get(s))]
-    if fixture_slots:
-        log(f"WARNING: upstream slots {fixture_slots} are dry runs; using the synthetic test landscape for them")
-        synth = make_synthetic_inputs(work / "synthetic_inputs", crs=run["case"]["crs"])
-        for s in fixture_slots:
-            inputs[s] = synth[s]
+    inputs = dict(run["inputs"])
+    missing = [s for s in ("landscape", "weather", "moisture", "ignition") if not inputs.get(s)]
+    if missing:
+        raise ValueError(f"run.json has no input for slots {missing}")
 
     land, weather = Path(inputs["landscape"]), Path(inputs["weather"])
     fuel, g = _read(land / "fuel_model_fbfm40.tif")
@@ -216,7 +172,7 @@ def prepare(run: dict, log) -> dict:
     }
     return {"cubes": cubes, "shape": shape, "resolution": (band, cell_h, cell_w),
             "ignitions": ign_cells, "duration": duration, "start": start, "geo": g,
-            "fixture_slots": fixture_slots, "moisture_defaulted": defaulted}
+            "moisture_defaulted": defaulted}
 
 
 def run_model(p: dict, log) -> dict:
@@ -260,7 +216,6 @@ def collect(p: dict, out: dict, out_dir: Path) -> dict:
         "max_fireline_intensity_kw_m": round(float(fli.max()), 1) if fli.size else 0.0,
         "crown_fire_cells": int((m["fire_type"] >= 2).sum()),
         "runtime_s": round(out["runtime_s"], 3),
-        "synthetic_inputs_for": p["fixture_slots"] or "none",
         "moisture_defaults_used": p["moisture_defaulted"] or "none",
         "outputs": sorted(f.name for f in out_dir.iterdir()),
     }
@@ -268,18 +223,11 @@ def collect(p: dict, out: dict, out_dir: Path) -> dict:
     return summary
 
 
-def _is_real(path) -> bool:
-    """An upstream artifact is real if it holds data, not just a dry-run provenance record."""
-    if not path or not Path(path).is_dir():
-        return False
-    prov = Path(path) / "provenance.json"
-    return not (prov.exists() and json.loads(prov.read_text()).get("dry_run"))
-
-
 def execute(run_dir: Path, log, root: Path | None = None) -> dict:
-    """Paths in run.json are relative to the artifact root, which differs between the
-    host (repo/artifacts) and the Kubernetes pod (/artifacts). Absolute paths also work."""
-    root = root or Path(os.environ.get("BENCH_ARTIFACT_ROOT", "/artifacts"))
+    """Run the model on run_dir/run.json and write run_dir/prediction/. Input paths in
+    run.json are relative to the artifact root (BENCH_ARTIFACT_ROOT, set by the framework),
+    so the same run.json works wherever the artifacts are mounted."""
+    root = root or Path(os.environ["BENCH_ARTIFACT_ROOT"])
     run = json.loads((run_dir / "run.json").read_text())
     run["run_dir"] = str(run_dir)
     run["inputs"] = {k: str(root / v) for k, v in run.get("inputs", {}).items() if v}
@@ -292,18 +240,9 @@ def execute(run_dir: Path, log, root: Path | None = None) -> dict:
 
 
 def main() -> None:
-    if os.environ.get("DAGSTER_PIPES_CONTEXT"):
-        from dagster_pipes import open_dagster_pipes
-        with open_dagster_pipes() as pipes:
-            root = Path(os.environ.get("BENCH_ARTIFACT_ROOT", "/artifacts"))
-            run_dir = root / pipes.get_extra("run_dir")
-            summary = execute(run_dir, pipes.log.info, root)
-            pipes.report_asset_materialization(metadata={
-                k: (json.dumps(v) if isinstance(v, (list, dict)) else v) for k, v in summary.items()})
-    else:
-        if len(sys.argv) != 2:
-            sys.exit("usage: python elmfire_block.py <run_dir containing run.json>")
-        print(json.dumps(execute(Path(sys.argv[1]), print), indent=2))
+    if len(sys.argv) != 2:
+        sys.exit("usage: python elmfire_block.py <run_dir containing run.json>")
+    print(json.dumps(execute(Path(sys.argv[1]), print), indent=2))
 
 
 if __name__ == "__main__":

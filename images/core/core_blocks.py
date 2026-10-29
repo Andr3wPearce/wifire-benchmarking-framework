@@ -1,4 +1,4 @@
-"""The framework's Python-only blocks: sources, transforms, reference and metrics.
+"""The framework's Python-only blocks: sources, transforms, the reference and metrics.
 
 Each block is one function `block(step, log) -> summary`. The framework hands it a
 `step` dict (see docs/block_contract.md, "Step contract"):
@@ -8,10 +8,14 @@ Each block is one function `block(step, log) -> summary`. The framework hands it
      "inputs": {"in": <dir of the previous step in the chain>, <slot>: <dir>, ...},
      "out_dir": <dir to write>}
 
-and the block writes canonical artifacts (docs/conventions.md) into `out_dir`,
-plus `provenance.json`. Model blocks (ELMFIRE, ...) live in their own images.
+and the block writes canonical artifacts (docs/conventions.md) into `out_dir`. `execute`
+adds `provenance.json` (what ran, with which parameters, and the block's summary), and
+the framework then checks the rasters against the conventions before accepting them.
 
-Runs standalone for debugging:  python core_blocks.py <step.json>
+Models (ELMFIRE, ...) are not here: each model has its own adapter and image.
+Dependencies: numpy, rasterio, requests (images/wstc/core).
+
+Runs standalone for debugging:  PYTHONPATH=src/bench python core_blocks.py <step.json>
 """
 from __future__ import annotations
 
@@ -32,21 +36,11 @@ UA = {"User-Agent": "scil-bench (UCSD SCIL wildfire spread-model benchmarking)"}
 
 
 # --------------------------------------------------------------------------- #
-# the case grid: every raster that crosses a block boundary sits on it
+# shared helpers
 # --------------------------------------------------------------------------- #
-def case_grid(case: dict):
-    """(transform, (rows, cols)) of the case grid: the case's WGS84 domain projected to the
-    case CRS and snapped outward to whole cells, north-up (docs/conventions.md, section 1)."""
-    from rasterio.transform import from_origin
-    from rasterio.warp import transform_bounds
-
-    w, s, e, n = case["domain_wgs84"]
-    left, bottom, right, top = transform_bounds("EPSG:4326", case["crs"], w, s, e, n, densify_pts=21)
-    res = float(case["resolution_m"])
-    left, bottom = math.floor(left / res) * res, math.floor(bottom / res) * res
-    right, top = math.ceil(right / res) * res, math.ceil(top / res) * res
-    shape = (int(round((top - bottom) / res)), int(round((right - left) / res)))
-    return from_origin(left, top, res, res), shape
+# the case grid is a convention, so it lives with the conventions (src/bench/conventions.py,
+# shipped next to this file in every step)
+from conventions import case_grid  # noqa: E402
 
 
 def t0(case: dict) -> datetime:
@@ -442,7 +436,7 @@ def execute(step: dict, log=print) -> dict:
     summary = BLOCKS[step["block"]](step, log)
     out = Path(step["out_dir"])
     out.mkdir(parents=True, exist_ok=True)
-    prov = {"dry_run": False, "block": step["block"], "version": step.get("version"),
+    prov = {"block": step["block"], "version": step.get("version"),
             "params": step.get("params", {}), "selection": step.get("selection", {}),
             "seconds": round(time.time() - t, 1), "summary": summary}
     (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str))

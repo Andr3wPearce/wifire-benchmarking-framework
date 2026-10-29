@@ -1,35 +1,39 @@
-# Red Sky demo: the Hughes Fire (Jan 22 2025, Castaic, LA County) with real inputs.
-# A workflow: config only, no code. Its name is the file name.
+# Red Sky demo: the Hughes Fire (reported 10:53 PST, Jan 22 2025, Lake Hughes Rd near
+# Castaic Lake, LA County; 10,425 acres at containment) with real inputs.
+#
+# A workflow is configuration only: no code. Its name is its file name. Every block it
+# names is a manifest in blocks/. See README.md for what each section does.
+
 case:
   incident: HUGHES
-  crs: EPSG:5070          # working CRS for the case
-  resolution_m: 30        # working grid; adapters regrid to their own needs
+  crs: EPSG:5070                    # working CRS (CONUS Albers, metres); every raster is in it
+  resolution_m: 30                  # working grid; LANDFIRE's native resolution
   mode: retrospective
-  t0: "2025-01-22T18:53:00Z"                    # reported start, 10:53 PST (CAL FIRE)
-  window_h: 24                                  # weather window from t0
-  domain_wgs84: [-118.70, 34.48, -118.45, 34.68]  # W, S, E, N; the case grid covers it
+  t0: "2025-01-22T18:53:00Z"        # simulation clock zero: the reported start (CAL FIRE), in UTC
+  window_h: 24                      # how much weather to fetch from t0
+  domain_wgs84: [-118.70, 34.48, -118.45, 34.68]   # W, S, E, N; the case grid is this, projected and snapped
 
-inputs:
+inputs:                             # one entry per input slot
   landscape:
     source: {block: landfire, version: "2024", layers: [fbfm40, cc, ch, cbh, cbd, elevation]}
-    transforms:
+    transforms:                     # applied in order to the source's output
       - {block: roads_override}
   weather:
-    source: {block: station_wind}       # no WindNinja: one station, uniform over the domain
+    source: {block: station_wind}   # no WindNinja yet: one station, uniform over the domain
   moisture:
     source: {block: fixed_moisture, params: {dead_1h: 0.06}}
-  ignition:                             # two sources = one axis of the comparison
+  ignition:                         # two sources = a comparison axis: every model runs once per source
     sources:
       - block: triangulated_ignition
         params: {lat: 34.553008, lon: -118.56687, time_utc: "2025-01-22T18:53:00Z",
                  source: "CAL FIRE incident page (reported origin)"}
-      - block: ngfs_ignition            # TEMP(dry-run): placeholder point until we have the NGFS first detection
+      - block: ngfs_ignition            # TEMP(placeholder-data): same point until we have the NGFS first detection
         params: {lat: 34.553008, lon: -118.56687, time_utc: "2025-01-22T18:53:00Z",
                  source: "PLACEHOLDER: same as reported origin"}
 
-models:
+models:                             # a list value for a parameter would be a sweep (one run per value)
   - {block: elmfire, params: {duration_min: 600}}
-  - {block: wrf_fire}                                           # will be skipped: no 3D forcing
+  - {block: wrf_fire}               # kept on purpose: the resolver skips it (no 3D forcing) and says why
 
 reference: {block: final_perimeter, file: references/hughes_final_perimeter.geojson}
 metrics: [{block: iou}, {block: area_bias}]

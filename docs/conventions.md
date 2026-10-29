@@ -4,9 +4,12 @@ Every artifact that crosses a block boundary follows these rules. Sources
 convert *into* them; model adapters convert *out of* them into whatever their
 model wants (and back). Nothing in between guesses.
 
-The framework checks rasters against the machine-checkable parts
-(`src/bench/conventions.py`) on the way into and out of every real block, and
-fails the step if they're violated.
+The framework checks every raster a block writes against the machine-checkable
+parts (`src/bench/conventions.py`: orientation, CRS, the exact case grid,
+resolution, plausible value ranges per variable) before the artifact is
+accepted, and fails the step if any is violated. Since every block's inputs are
+some earlier block's accepted outputs, nothing that breaks the conventions is
+ever read.
 
 ## 1. Space
 

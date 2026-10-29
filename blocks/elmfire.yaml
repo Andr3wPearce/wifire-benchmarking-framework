@@ -2,9 +2,10 @@ name: elmfire
 kind: model
 version: pyretechnics-2026.10.20
 description: >
-  ELMFIRE-style level-set spread model, via SIG's pyretechnics. First real
-  block: runs in its own container (images/elmfire), everything upstream of it
-  may still be a dry run (then it uses a synthetic test landscape, and says so).
+  ELMFIRE-style level-set spread model, via SIG's pyretechnics. The adapter
+  (images/elmfire/elmfire_block.py) converts canonical inputs into
+  pyretechnics' space-time cubes and its outputs back into a canonical
+  Prediction.
 requires:
 - fuel_model_fbfm40
 - canopy_cover
@@ -28,7 +29,7 @@ params:
     type: float
     default: 1.5
     range: [0.5, 3.0]
-    rationale: matched to FARSITE so both models spread alike (pyretechnics fuel_spread_adjustment)
+    rationale: pyretechnics fuel_spread_adjustment; matched to FARSITE so both models spread alike
   duration_min:
     type: float
     default: 240
@@ -40,13 +41,10 @@ params:
     range: [10, 180]
     rationale: time step of the weather cubes; hourly matches station weather
 native:
-  crs: EPSG:5070          # runs on the case grid at the case resolution (no regrid needed)
+  crs: EPSG:5070                  # runs on the case grid at the case resolution (no regrid)
 resources:
   cpu: 2
-  memory_gb: 8
-  timeout_min: 10
-image: bench/elmfire:0.1
+  memory_gb: 6
 execution:
-  image: bench/elmfire:0.1                         # k8s backend (built by scripts/build_blocks.sh)
-  local_entrypoint: images/elmfire/elmfire_block.py  # local backend (BENCH_BACKEND=local)
-  wstc_image: elmfire                              # images/wstc/elmfire, for the WSTC Dagster
+  code: images/elmfire/elmfire_block.py
+  image: elmfire

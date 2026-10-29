@@ -1,13 +1,10 @@
 name: final_perimeter
 kind: reference
+description: >
+  The observed final perimeter, from a GeoJSON file the workflow names
+  (reference.file), rasterized onto the case grid for scoring.
 observes:
 - perimeter
-description: >
-  The observed final perimeter (a GeoJSON file named in the workflow), rasterized
-  onto the case grid for scoring.
-native:
-  crs: EPSG:4326
 execution:
-  python: images/core/core_blocks.py
-  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
-image: registry.example/blocks/final-perimeter:0.1
+  code: images/core/core_blocks.py
+  image: core
