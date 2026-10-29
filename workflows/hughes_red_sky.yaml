@@ -1,0 +1,36 @@
+# Red Sky demo: the Hughes Fire (Jan 22 2025, Castaic, LA County) with real inputs.
+# A workflow: config only, no code. Its name is the file name.
+case:
+  incident: HUGHES
+  crs: EPSG:5070          # working CRS for the case
+  resolution_m: 30        # working grid; adapters regrid to their own needs
+  mode: retrospective
+  t0: "2025-01-22T18:53:00Z"                    # reported start, 10:53 PST (CAL FIRE)
+  window_h: 24                                  # weather window from t0
+  domain_wgs84: [-118.70, 34.48, -118.45, 34.68]  # W, S, E, N; the case grid covers it
+
+inputs:
+  landscape:
+    source: {block: landfire, version: "2024", layers: [fbfm40, cc, ch, cbh, cbd, elevation]}
+    transforms:
+      - {block: roads_override}
+  weather:
+    source: {block: station_wind}       # no WindNinja: one station, uniform over the domain
+  moisture:
+    source: {block: fixed_moisture, params: {dead_1h: 0.06}}
+  ignition:                             # two sources = one axis of the comparison
+    sources:
+      - block: triangulated_ignition
+        params: {lat: 34.553008, lon: -118.56687, time_utc: "2025-01-22T18:53:00Z",
+                 source: "CAL FIRE incident page (reported origin)"}
+      - block: ngfs_ignition            # TEMP(dry-run): placeholder point until we have the NGFS first detection
+        params: {lat: 34.553008, lon: -118.56687, time_utc: "2025-01-22T18:53:00Z",
+                 source: "PLACEHOLDER: same as reported origin"}
+
+models:
+  - {block: farsite, params: {spread_adjustment: [1.2, 1.5]}}   # a list = a sweep (dry run for now)
+  - {block: elmfire, params: {duration_min: 600}}
+  - {block: wrf_fire}                                           # will be skipped: no 3D forcing
+
+reference: {block: final_perimeter, file: references/hughes_final_perimeter.geojson}
+metrics: [{block: iou}, {block: area_bias}]

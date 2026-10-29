@@ -41,6 +41,7 @@ case grid, in **SI units**.
 | | `canopy_bulk_density.tif` | kg/m³ |
 | weather | `wind_speed_10m.tif` | m/s |
 | | `wind_from_direction.tif` | degrees clockwise from north, direction wind blows **from** |
+| | or `wind_series.json` | hourly, uniform in space: `hours[] = {time_utc, wind_speed_10m (m/s), wind_from_direction (deg from grid north)}`; station wind uses this |
 | moisture | `fuel_moisture.json` | fractions: `dead_1h`, `dead_10h`, `dead_100h`, `live_herbaceous`, `live_woody`, `foliar` (missing ones get adapter defaults, which are reported) |
 | ignition | `ignition.geojson` | Point features in the case CRS, `properties.time_min` |
 
@@ -64,3 +65,25 @@ working grid by each model adapter, never resampled.
   **south** edge, so the ELMFIRE adapter flips every grid going in and out.
 - Pin the model's dependencies in the image (pyretechnics needs NumPy 1.26;
   NumPy 2 breaks it at import).
+
+## Step contract (sources, transforms, reference, metrics)
+
+Python-only blocks (`images/core/core_blocks.py`; manifest `execution: {python: ...}`) get
+one `step.json`:
+
+```json
+{"block": "landfire", "kind": "source", "version": "2024",
+ "case": {"incident": "HUGHES", "crs": "EPSG:5070", "resolution_m": 30,
+          "t0": "2025-01-22T18:53:00Z", "window_h": 24, "domain_wgs84": [-118.70, 34.48, -118.45, 34.68]},
+ "params": {}, "selection": {"layers": ["fbfm40", "cc", "ch", "cbh", "cbd", "elevation"]},
+ "inputs": {"in": "<previous step in the chain>"},
+ "out_dir": "<where to write>"}
+```
+
+and write canonical artifacts into `out_dir`, plus `provenance.json`
+(`dry_run: false`, params, and the block's summary). Metrics get
+`inputs.prediction` and `inputs.reference` and write `score.json`.
+
+The **case grid** is derived, never stored: `domain_wgs84` projected to `case.crs`
+and snapped outward to whole cells (`core_blocks.case_grid`). Every block that
+writes rasters puts them on it.

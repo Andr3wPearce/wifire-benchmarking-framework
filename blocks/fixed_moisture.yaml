@@ -10,4 +10,6 @@ params:
     range:
     - 0.02
     - 0.35
+execution:
+  python: images/core/core_blocks.py
 image: registry.example/blocks/fixed-moisture:0.1

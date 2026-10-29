@@ -38,9 +38,12 @@ def test_override_changes_runs_and_keys():
 
 def test_auto_transforms_inserted():
     plan = resolve(spec())
+    # ignition points come in WGS84, so a reproject step is inserted before the transforms
+    steps = [s["step"] for br in plan["slots"]["ignition"] for s in br["steps"]]
+    assert "ignition.ngfs_ignition.auto_reproject" in steps
+    # station wind converts to canonical itself (grid-north directions): no reproject step
     steps = [s["step"] for br in plan["slots"]["weather"] for s in br["steps"]]
-    assert steps == ["weather.station_wind.fetch", "weather.station_wind.auto_reproject",
-                     "weather.station_wind.windninja"]
+    assert steps == ["weather.station_wind.fetch", "weather.station_wind.windninja"]
 
 
 def test_bad_param_type_rejected():

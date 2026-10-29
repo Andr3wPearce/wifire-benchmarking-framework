@@ -13,4 +13,6 @@ native:
   crs: EPSG:5070
   resolution_m: 30
 image: registry.example/blocks/landfire:2024.1
-rationale: LANDFIRE COGs served by WIFIRE; data selection (version, layers) is part of identity.
+rationale: LANDFIRE via the LANDFIRE Product Service (LFPS), clipped to the case domain on their side; data selection (version, layers) is part of identity.
+execution:
+  python: images/core/core_blocks.py

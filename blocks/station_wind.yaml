@@ -1,8 +1,16 @@
 name: station_wind
 kind: source
 slot: weather
+description: >
+  Hourly 10 m wind from the nearest ASOS station (Iowa Environmental Mesonet),
+  uniform over the domain. Rotates directions from true to grid north itself, so
+  it hands over canonical data directly (no reproject step).
 produces:
 - surface_wind
-native:
-  crs: EPSG:4326
+params:
+  station: {type: str, default: "", rationale: "IEM station id (e.g. SDB); empty = nearest with data"}
+  network: {type: str, default: CA_ASOS}
+  max_km: {type: float, default: 80, rationale: farthest station considered}
+execution:
+  python: images/core/core_blocks.py
 image: registry.example/blocks/station-wind:0.3

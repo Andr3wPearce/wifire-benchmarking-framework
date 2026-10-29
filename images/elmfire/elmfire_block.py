@@ -129,8 +129,16 @@ def prepare(run: dict, log) -> dict:
     aspect = (np.degrees(np.arctan2(-dz_dx, -dz_dnorth)) + 360.0) % 360.0
 
     canopy = {k: _read(land / f"{k}.tif")[0].astype("float32") for k in CANOPY_LAYERS}
-    wind_ms, _ = _read(weather / "wind_speed_10m.tif")
-    wind_from, _ = _read(weather / "wind_from_direction.tif")
+    series_file = weather / "wind_series.json"
+    if series_file.exists():
+        # hourly, uniform in space (station wind): one value per time band, broadcast over the grid
+        series = json.loads(series_file.read_text())
+        wind_ms = wind_from = None
+        wind_series = series
+    else:
+        wind_ms, _ = _read(weather / "wind_speed_10m.tif")
+        wind_from, _ = _read(weather / "wind_from_direction.tif")
+        wind_series = None
 
     moist_given = json.loads((Path(inputs["moisture"]) / "fuel_moisture.json").read_text())
     moist = {**MOISTURE_DEFAULTS, **moist_given}
@@ -151,7 +159,12 @@ def prepare(run: dict, log) -> dict:
 
     duration = float(params["duration_min"])
     band = float(params["band_duration_min"])
-    bands = int(np.ceil(duration / band)) + 1
+    # the simulation clock is minutes since the case's t0; start at the (earliest) ignition time
+    ign_times = [float(f.get("properties", {}).get("time_min", 0.0)) for f in ign["features"]]
+    start = max(0.0, min(ign_times))
+    if min(ign_times) < 0:
+        log(f"ignition time {min(ign_times):.0f} min is before the case t0; starting at t0")
+    bands = int(np.ceil((start + duration) / band)) + 1
     shape = (bands, *g["shape"])
 
     def cube(v):
@@ -164,13 +177,35 @@ def prepare(run: dict, log) -> dict:
     n_rows = g["shape"][0]
     ign_cells = [(n_rows - 1 - r, c) for r, c in ign_cells]   # same flip for ignition cells
 
+    if wind_series is not None:
+        # band k covers [k*band, (k+1)*band) min after t0; take the hourly record nearest its start
+        from datetime import datetime, timedelta
+        def _ts(x):
+            return datetime.fromisoformat(x.replace("Z", "+00:00"))
+        t_case = _ts(run["case"]["t0"])
+        hours = wind_series["hours"]
+        def at(k, key):
+            t = t_case + timedelta(minutes=k * band)
+            return min(hours, key=lambda h: abs((_ts(h["time_utc"]) - t).total_seconds()))[key]
+        wind_cubes = {
+            "wind_speed_10m": SpaceTimeCube(shape, np.array(
+                [at(k, "wind_speed_10m") * 3.6 for k in range(bands)], "float32").reshape(bands, 1, 1)),
+            "upwind_direction": SpaceTimeCube(shape, np.array(
+                [at(k, "wind_from_direction") for k in range(bands)], "float32").reshape(bands, 1, 1)),
+        }
+        log(f"wind: {wind_series.get('station')} hourly, {bands} bands from t0, "
+            f"{min(at(k, 'wind_speed_10m') for k in range(bands)):.1f}-"
+            f"{max(at(k, 'wind_speed_10m') for k in range(bands)):.1f} m/s")
+    else:
+        wind_cubes = {"wind_speed_10m": cube(wind_ms * 3.6),                       # m/s -> km/h
+                      "upwind_direction": cube(wind_from)}
+
     cubes = {
         "slope": cube(slope),
         "aspect": cube(aspect),
         "fuel_model": cube(fuel),
         **{k: cube(v) for k, v in canopy.items()},
-        "wind_speed_10m": cube(wind_ms * 3.6),                       # m/s -> km/h
-        "upwind_direction": cube(wind_from),
+        **wind_cubes,
         "fuel_moisture_dead_1hr": cube(moist["dead_1h"]),
         "fuel_moisture_dead_10hr": cube(moist["dead_10h"]),
         "fuel_moisture_dead_100hr": cube(moist["dead_100h"]),
@@ -180,7 +215,7 @@ def prepare(run: dict, log) -> dict:
         "fuel_spread_adjustment": cube(float(params["spread_adjustment"])),
     }
     return {"cubes": cubes, "shape": shape, "resolution": (band, cell_h, cell_w),
-            "ignitions": ign_cells, "duration": duration, "geo": g,
+            "ignitions": ign_cells, "duration": duration, "start": start, "geo": g,
             "fixture_slots": fixture_slots, "moisture_defaulted": defaulted}
 
 
@@ -192,7 +227,7 @@ def run_model(p: dict, log) -> dict:
         f"{len(p['ignitions'])} ignition(s), {p['duration']:.0f} min")
     t0 = time.perf_counter()
     out = els.spread_fire_with_phi_field(p["cubes"], state, cube_resolution=p["resolution"],
-                                         start_time=0.0, max_duration=p["duration"])
+                                         start_time=p.get("start", 0.0), max_duration=p["duration"])
     out["runtime_s"] = time.perf_counter() - t0
     return out
 

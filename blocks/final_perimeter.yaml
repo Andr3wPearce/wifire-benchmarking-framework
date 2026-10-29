@@ -2,6 +2,11 @@ name: final_perimeter
 kind: reference
 observes:
 - perimeter
+description: >
+  The observed final perimeter (a GeoJSON file named in the workflow), rasterized
+  onto the case grid for scoring.
 native:
   crs: EPSG:4326
+execution:
+  python: images/core/core_blocks.py
 image: registry.example/blocks/final-perimeter:0.1

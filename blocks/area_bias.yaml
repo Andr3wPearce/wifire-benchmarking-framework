@@ -3,4 +3,6 @@ kind: metric
 needs:
 - perimeter
 - perimeter
+execution:
+  python: images/core/core_blocks.py
 image: registry.example/blocks/metrics:0.3
