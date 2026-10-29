@@ -28,7 +28,6 @@ inputs:
                  source: "PLACEHOLDER: same as reported origin"}
 
 models:
-  - {block: farsite, params: {spread_adjustment: [1.2, 1.5]}}   # a list = a sweep (dry run for now)
   - {block: elmfire, params: {duration_min: 600}}
   - {block: wrf_fire}                                           # will be skipped: no 3D forcing
 
