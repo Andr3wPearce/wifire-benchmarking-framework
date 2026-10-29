@@ -16,3 +16,4 @@ image: registry.example/blocks/landfire:2024.1
 rationale: LANDFIRE via the LANDFIRE Product Service (LFPS), clipped to the case domain on their side; data selection (version, layers) is part of identity.
 execution:
   python: images/core/core_blocks.py
+  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)

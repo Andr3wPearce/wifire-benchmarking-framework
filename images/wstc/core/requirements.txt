@@ -1,0 +1,4 @@
+# Packages the core blocks (images/core/core_blocks.py) need on top of the server's image.
+rasterio~=1.4.3
+requests~=2.32
+boto3

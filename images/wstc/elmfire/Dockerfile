@@ -1,4 +1,4 @@
-# The blocks' environment as one image, for steps on the WSTC Dagster (NRP).
+# Image for the ELMFIRE block (pyretechnics) on the WSTC Dagster (NRP).
 # A step pod runs `dagster api execute_step`, so the image carries the server's Dagster
 # (dagster 1.13.26, dagster-k8s / dagster-postgres 0.29.26) plus what the server image has
 # (pandas, boto3). Python 3.12, not the official Dagster image's 3.10: pyretechnics needs >= 3.11.
@@ -7,6 +7,8 @@
 FROM python:3.12-slim-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
+# (requirements.txt is byte-identical to the earlier single-image recipe, so the compiled
+#  pyretechnics layer comes from cache; its first comment line predates the split)
 COPY requirements.txt /tmp/requirements.txt
 RUN pip wheel --no-cache-dir -w /wheels -r /tmp/requirements.txt
 

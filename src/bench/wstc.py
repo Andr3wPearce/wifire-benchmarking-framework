@@ -41,7 +41,7 @@ CASE_KEYS = {
     "landscape": ["crs", "resolution_m", "domain_wgs84"],
     "reference": ["crs", "resolution_m", "domain_wgs84"],
 }
-IMAGE_DIR = ROOT / "images" / "blocks"
+IMAGE_DIR = ROOT / "images" / "wstc"
 EXTRA_REQUIREMENTS = ["scipy~=1.12.0", "sortedcontainers~=2.4.0", "matplotlib<3.10", "requests~=2.32"]
 
 
@@ -104,7 +104,7 @@ def compile_plan(spec: dict, me: str, reference_text: str | None) -> dict:
                          "path": f"{inc}/{slot}/{block}-{identity}", "real": real,
                          "step": payload, "deps": [prev["key"]] if prev else [],
                          "input_paths": {"in": prev["path"]} if prev else {},
-                         "reason": st.get("reason")}
+                         "reason": st.get("reason"), "image_family": block_image_family(block)}
                 inputs.append(entry)
                 prev = entry
             tails[(slot, br["branch"])] = prev
@@ -116,7 +116,8 @@ def compile_plan(spec: dict, me: str, reference_text: str | None) -> dict:
                   "code": _block_code_hash(ref_block)})
         ref = {"key": [me, wf, "reference", ref_block], "block": ref_block, "identity": rid,
                "path": f"{inc}/reference/{ref_block}-{rid}", "real": is_real(ref_block),
-               "step": {"block": ref_block, "kind": "reference", "case": case, "params": {}}}
+               "step": {"block": ref_block, "kind": "reference", "case": case, "params": {}},
+               "image_family": block_image_family(ref_block)}
 
     runs = {}
     for r in plan["runs"]:
@@ -124,7 +125,7 @@ def compile_plan(spec: dict, me: str, reference_text: str | None) -> dict:
         pid = _h({"run_id": r["run_id"], "inputs": {s: t["identity"] for s, t in picked.items()},
                   "code": _block_code_hash(r["model"]), "version": r.get("block_version")})
         runs[r["run_key"]] = {
-            "model": r["model"], "run_id": r["run_id"], "identity": pid, "real": is_real(r["model"]),
+            "model": r["model"], "image_family": block_image_family(r["model"]), "run_id": r["run_id"], "identity": pid, "real": is_real(r["model"]),
             "path": f"{inc}/runs/{r['model']}-{pid}", "params": r["params"], "inputs": r["inputs"],
             "input_paths": {s: t["path"] for s, t in picked.items()},
             "input_real": {s: t["real"] for s, t in picked.items()},
@@ -134,7 +135,7 @@ def compile_plan(spec: dict, me: str, reference_text: str | None) -> dict:
                          "inputs": {s: t["path"] for s, t in picked.items()}}}
     metrics = {}
     for m in plan["runs"][0]["metrics"] if plan["runs"] else []:
-        metrics[m] = {"real": is_real(m), "code": _block_code_hash(m)}
+        metrics[m] = {"real": is_real(m), "code": _block_code_hash(m), "image_family": block_image_family(m)}
         for key, run in runs.items():
             sid = _h({"prediction": run["identity"], "reference": ref and ref["identity"],
                       "code": metrics[m]["code"]})
@@ -144,14 +145,22 @@ def compile_plan(spec: dict, me: str, reference_text: str | None) -> dict:
             "axes": plan["axes"], "resolved": plan}
 
 
-def image_tag() -> str:
-    """Same tag scripts/build_wstc_image.sh pushes: hash of the image's Dockerfile + requirements."""
-    data = (IMAGE_DIR / "Dockerfile").read_bytes() + (IMAGE_DIR / "requirements.txt").read_bytes()
-    return hashlib.sha1(data).hexdigest()[:10]
+IMAGE_FAMILIES = ("core", "elmfire")      # images/wstc/<family>/ -> docker.io/<user>/bench-<family>
 
 
-def image_ref(user: str = "a3pearce") -> str:
-    return f"docker.io/{user}/bench-blocks:{image_tag()}"
+def image_tag(family: str) -> str:
+    """Same tag scripts/build_wstc_image.sh pushes: hash of that image's Dockerfile + requirements."""
+    d = IMAGE_DIR / family
+    return hashlib.sha1((d / "Dockerfile").read_bytes() + (d / "requirements.txt").read_bytes()).hexdigest()[:10]
+
+
+def image_refs(user: str = "a3pearce") -> dict[str, str]:
+    """{family: image}: every real block runs in its family's image (blocks/<name>.yaml, execution.wstc_image)."""
+    return {f: f"docker.io/{user}/bench-{f}:{image_tag(f)}" for f in IMAGE_FAMILIES}
+
+
+def block_image_family(block: str) -> str:
+    return BLOCKS.get(block, {}).get("execution", {}).get("wstc_image", "core")   # auto steps (reproject): core
 
 
 def image_published(ref: str) -> bool:
@@ -190,9 +199,10 @@ def build_env_file(me: str, out_dir: Path) -> Path:
 
 
 def build_workflow_file(spec_path: Path, me: str, out_dir: Path, reference: Path | None = None,
-                        image: str | None = None) -> tuple[Path, dict]:
+                        images: dict[str, str] | None = None) -> tuple[Path, dict]:
     """<me>_<workflow>.py: the compiled plan and the blocks' code, ready for d.upload().
-    image: run every block step in this image (per-step image); None = the shared environment."""
+    images: {family: image} from image_refs(): each step runs in its block's image (per-step
+    images); None = every step uses the shared environment."""
     spec = load_spec(Path(spec_path))
     ref_path = reference or (ROOT / spec["reference"]["file"] if spec["reference"].get("file") else None)
     ref_text = Path(ref_path).read_text() if ref_path and Path(ref_path).exists() else None
@@ -200,7 +210,7 @@ def build_workflow_file(spec_path: Path, me: str, out_dir: Path, reference: Path
     if not re.fullmatch(r"[a-z][a-z0-9_]*", cp["workflow"]):
         raise ValueError(f"workflow name {cp['workflow']!r}: use lowercase letters, digits, underscores")
     src = TEMPLATE.read_text()
-    for k, v in {"__ME__": me, "__WF__": cp["workflow"], "__ENV_ID__": env_id(), "__IMAGE__": repr(image),
+    for k, v in {"__ME__": me, "__WF__": cp["workflow"], "__ENV_ID__": env_id(), "__IMAGES__": repr(images),
                  "__PLAN__": repr(json.dumps({k: v for k, v in cp.items() if k != "resolved"})),
                  "__REFERENCE__": repr(ref_text),
                  "__CORE_SOURCE__": repr(CORE.read_text()),

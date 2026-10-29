@@ -49,3 +49,4 @@ image: bench/elmfire:0.1
 execution:
   image: bench/elmfire:0.1                         # k8s backend (built by scripts/build_blocks.sh)
   local_entrypoint: images/elmfire/elmfire_block.py  # local backend (BENCH_BACKEND=local)
+  wstc_image: elmfire                              # images/wstc/elmfire, for the WSTC Dagster

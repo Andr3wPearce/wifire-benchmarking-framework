@@ -12,4 +12,5 @@ params:
     - 0.35
 execution:
   python: images/core/core_blocks.py
+  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
 image: registry.example/blocks/fixed-moisture:0.1

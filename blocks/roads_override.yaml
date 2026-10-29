@@ -10,5 +10,6 @@ params:
     default: GR2
 execution:
   python: images/core/core_blocks.py
+  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
 image: registry.example/blocks/reclassify:0.4
 rationale: Roads/urban (91-99 except 92/98) set to GR2 so both models treat them alike.

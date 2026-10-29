@@ -13,4 +13,5 @@ params:
   max_km: {type: float, default: 80, rationale: farthest station considered}
 execution:
   python: images/core/core_blocks.py
+  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
 image: registry.example/blocks/station-wind:0.3

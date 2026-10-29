@@ -13,4 +13,5 @@ native:
   crs: EPSG:4326          # the framework inserts a reproject step to the case CRS
 execution:
   python: images/core/core_blocks.py
+  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
 image: registry.example/blocks/ngfs:0.2

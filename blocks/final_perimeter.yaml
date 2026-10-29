@@ -9,4 +9,5 @@ native:
   crs: EPSG:4326
 execution:
   python: images/core/core_blocks.py
+  wstc_image: core                 # images/wstc/core (TEMP(wstc-minimal) naming)
 image: registry.example/blocks/final-perimeter:0.1
