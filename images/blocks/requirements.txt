@@ -1,0 +1,9 @@
+# Packages for every real block (images/core and images/elmfire), on top of the WSTC Dagster image.
+pyretechnics==2026.10.20
+numpy~=1.26.2          # pyretechnics breaks on NumPy 2
+rasterio~=1.4.3
+scipy~=1.12.0
+sortedcontainers~=2.4.0
+matplotlib<3.10
+requests~=2.32
+boto3

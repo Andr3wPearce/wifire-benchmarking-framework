@@ -7,8 +7,9 @@
 #   __ME__/__WF__/prediction               partitioned: one partition per run (model x params x inputs)
 #   __ME__/__WF__/score/<metric>           partitioned like prediction
 #   __ME__/__WF__/report                   every finished run's scores in one table
-# Each step runs its block in the shared environment (<me>_bench_env_job builds it) and
-# writes to the shared volume under the artifact's identity, so finished work is reused.
+# Each step runs its block either in the blocks' image (IMAGE, a per-step image) or, if IMAGE
+# is None, in the shared environment that <me>_bench_env_job builds. Either way it writes to
+# the shared volume under the artifact's identity, so finished work is reused.
 import base64
 import json
 import os
@@ -22,6 +23,7 @@ import dagster as dg
 ME = "__ME__"
 WF = "__WF__"
 ENV_ID = "__ENV_ID__"
+IMAGE = __IMAGE__        # e.g. "docker.io/a3pearce/bench-blocks:<tag>"; None = shared environment
 PLAN = json.loads(__PLAN__)
 REFERENCE_GEOJSON = __REFERENCE__
 CODE = {"core_blocks.py": __CORE_SOURCE__, "elmfire_block.py": __ELMFIRE_SOURCE__,
@@ -37,24 +39,33 @@ MODEL_RESOURCES = {"requests": {"cpu": "2", "memory": "6Gi"}, "limits": {"cpu": 
 BLOCK_RESOURCES = {"requests": {"cpu": "1", "memory": "3Gi"}, "limits": {"cpu": "1.2", "memory": "3600Mi"}}
 
 
+def _k8s(resources: dict) -> dict:
+    """op_tags for a block step: its resources and, if set, the blocks' image."""
+    container = {"resources": resources, **({"image": IMAGE} if IMAGE else {})}
+    return {"dagster-k8s/config": {"container_config": container}}
+
+
 # --------------------------------------------------------------------------- #
 # running a block in the shared environment
 # --------------------------------------------------------------------------- #
 def _env() -> tuple[str, dict]:
     """(python, environment variables) for running blocks."""
+    code = Path("/tmp/bench/code")
+    code.mkdir(parents=True, exist_ok=True)
+    for name, text in CODE.items():
+        (code / name).write_text(text)
+    common = {"BENCH_ARTIFACT_ROOT": str(ART), "MPLCONFIGDIR": "/tmp/bench/mpl", "PYTHONUNBUFFERED": "1"}
+    if IMAGE:   # the step already runs in the blocks' image: its own Python has every package
+        import sys
+        return sys.executable, {**os.environ, **common, "PYTHONPATH": str(code)}
     env = STORE / "env" / ENV_ID
     ready = env / "ready.json"
     if not ready.exists():
         raise dg.Failure(f"the blocks' environment {ENV_ID} isn't built yet: upload {ME}_bench_env.py "
                          f"and run {ME}_bench_env_job once")
     info = json.loads(ready.read_text())
-    code = Path("/tmp/bench/code")
-    code.mkdir(parents=True, exist_ok=True)
-    for name, text in CODE.items():
-        (code / name).write_text(text)
     site = env / "site"
-    variables = {**os.environ, "PYTHONPATH": f"{site}:{code}", "LD_LIBRARY_PATH": f"{site}/bench_libs",
-                 "BENCH_ARTIFACT_ROOT": str(ART), "MPLCONFIGDIR": "/tmp/bench/mpl", "PYTHONUNBUFFERED": "1"}
+    variables = {**os.environ, **common, "PYTHONPATH": f"{site}:{code}", "LD_LIBRARY_PATH": f"{site}/bench_libs"}
     return str(env / info["python"]), variables
 
 
@@ -125,7 +136,7 @@ def _input_asset(entry: dict):
     @dg.asset(key=dg.AssetKey(entry["key"]), group_name=GROUP,
               deps=[dg.AssetKey(k) for k in entry["deps"]], code_version=entry["identity"],
               description=f"{entry['block']} ({entry['step']['kind']}): {entry['name']}",
-              op_tags={"dagster-k8s/config": {"container_config": {"resources": BLOCK_RESOURCES}}})
+              op_tags=_k8s(BLOCK_RESOURCES))
     def _a(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         def build(tmp: Path):
             if not entry["real"]:
@@ -150,7 +161,7 @@ def _input_asset(entry: dict):
 def _reference_asset(ref: dict):
     @dg.asset(key=dg.AssetKey(ref["key"]), group_name=GROUP, code_version=ref["identity"],
               description="The observed final perimeter, rasterized onto the case grid.",
-              op_tags={"dagster-k8s/config": {"container_config": {"resources": BLOCK_RESOURCES}}})
+              op_tags=_k8s(BLOCK_RESOURCES))
     def _r(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         def build(tmp: Path):
             src = tmp / "_reference_source.geojson"
@@ -185,7 +196,7 @@ def _preview_md(pred_dir: Path) -> str | None:
 
 @dg.asset(key=PRED_KEY, group_name=GROUP, partitions_def=RUNS_PART, deps=[dg.AssetKey(list(k)) for k in TAIL_KEYS],
           description="One spread-model run per partition: model x params x input choices.",
-          op_tags={"dagster-k8s/config": {"container_config": {"resources": MODEL_RESOURCES}}})
+          op_tags=_k8s(MODEL_RESOURCES))
 def prediction(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     run = PLAN["runs"][context.partition_key]
     missing = [s for s, p in run["input_paths"].items() if not _done(p)]
@@ -215,7 +226,7 @@ def prediction(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     if preview:
         md["preview"] = dg.MetadataValue.md(preview)
     return dg.MaterializeResult(metadata={
-        **md, "model": run["model"], "run_id": run["run_id"], "params": json.dumps(run["params"]),
+        **md, "model": run["model"], "image": IMAGE or f"shared environment {ENV_ID}", "run_id": run["run_id"], "params": json.dumps(run["params"]),
         "inputs": json.dumps(run["inputs"] or {"(one source per slot)": "-"}),
         "reused": reused, "artifact": run["path"], "dry_run": not run["real"],
         "inputs_dry_run": ", ".join(s for s, r in run["input_real"].items() if not r) or "none"})
@@ -225,7 +236,7 @@ def _score_asset(metric: str):
     @dg.asset(key=dg.AssetKey([ME, WF, "score", metric]), group_name=GROUP, partitions_def=RUNS_PART,
               deps=[PRED_KEY] + ([REF_KEY] if REF_KEY else []),
               description=f"{metric}: prediction vs the observed perimeter.",
-              op_tags={"dagster-k8s/config": {"container_config": {"resources": BLOCK_RESOURCES}}})
+              op_tags=_k8s(BLOCK_RESOURCES))
     def _s(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         run = PLAN["runs"][context.partition_key]
         if not run["real"]:

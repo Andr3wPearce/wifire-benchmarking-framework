@@ -41,6 +41,7 @@ CASE_KEYS = {
     "landscape": ["crs", "resolution_m", "domain_wgs84"],
     "reference": ["crs", "resolution_m", "domain_wgs84"],
 }
+IMAGE_DIR = ROOT / "images" / "blocks"
 EXTRA_REQUIREMENTS = ["scipy~=1.12.0", "sortedcontainers~=2.4.0", "matplotlib<3.10", "requests~=2.32"]
 
 
@@ -143,6 +144,25 @@ def compile_plan(spec: dict, me: str, reference_text: str | None) -> dict:
             "axes": plan["axes"], "resolved": plan}
 
 
+def image_tag() -> str:
+    """Same tag scripts/build_wstc_image.sh pushes: hash of the image's Dockerfile + requirements."""
+    data = (IMAGE_DIR / "Dockerfile").read_bytes() + (IMAGE_DIR / "requirements.txt").read_bytes()
+    return hashlib.sha1(data).hexdigest()[:10]
+
+
+def image_ref(user: str = "a3pearce") -> str:
+    return f"docker.io/{user}/bench-blocks:{image_tag()}"
+
+
+def image_published(ref: str) -> bool:
+    """Is this tag on Docker Hub? (NRP pulls it from there.)"""
+    import requests
+    _, path = ref.split("docker.io/", 1)
+    repo, tag = path.rsplit(":", 1)
+    r = requests.get(f"https://hub.docker.com/v2/repositories/{repo}/tags/{tag}", timeout=20)
+    return r.status_code == 200
+
+
 def env_requirements() -> list[str]:
     reqs = [l.strip() for l in (ROOT / "images/elmfire/requirements.txt").read_text().splitlines()
             if l.strip() and not l.startswith("#") and not l.startswith(("pyretechnics", "dagster-pipes"))]
@@ -169,8 +189,10 @@ def build_env_file(me: str, out_dir: Path) -> Path:
     return out
 
 
-def build_workflow_file(spec_path: Path, me: str, out_dir: Path, reference: Path | None = None) -> tuple[Path, dict]:
-    """<me>_<workflow>.py: the compiled plan and the blocks' code, ready for d.upload()."""
+def build_workflow_file(spec_path: Path, me: str, out_dir: Path, reference: Path | None = None,
+                        image: str | None = None) -> tuple[Path, dict]:
+    """<me>_<workflow>.py: the compiled plan and the blocks' code, ready for d.upload().
+    image: run every block step in this image (per-step image); None = the shared environment."""
     spec = load_spec(Path(spec_path))
     ref_path = reference or (ROOT / spec["reference"]["file"] if spec["reference"].get("file") else None)
     ref_text = Path(ref_path).read_text() if ref_path and Path(ref_path).exists() else None
@@ -178,7 +200,7 @@ def build_workflow_file(spec_path: Path, me: str, out_dir: Path, reference: Path
     if not re.fullmatch(r"[a-z][a-z0-9_]*", cp["workflow"]):
         raise ValueError(f"workflow name {cp['workflow']!r}: use lowercase letters, digits, underscores")
     src = TEMPLATE.read_text()
-    for k, v in {"__ME__": me, "__WF__": cp["workflow"], "__ENV_ID__": env_id(),
+    for k, v in {"__ME__": me, "__WF__": cp["workflow"], "__ENV_ID__": env_id(), "__IMAGE__": repr(image),
                  "__PLAN__": repr(json.dumps({k: v for k, v in cp.items() if k != "resolved"})),
                  "__REFERENCE__": repr(ref_text),
                  "__CORE_SOURCE__": repr(CORE.read_text()),
