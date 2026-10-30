@@ -63,10 +63,14 @@ def _python_env(extra: dict | None = None) -> dict:
 
 
 def _run(context, script: str, *args, extra_env: dict | None = None) -> None:
-    """Run one of the shipped scripts with the image's Python, streaming its output to the
-    Dagster log. A non-zero exit fails the step, with the last lines of output attached."""
+    """Run one of the shipped scripts with the image's block Python, streaming its output to
+    the Dagster log. A non-zero exit fails the step, with the last lines of output attached.
+
+    An image whose blocks need a different Python than Dagster's sets BENCH_PYTHON
+    (bench-elmfire: Dagster on 3.10, pyretechnics on 3.12); otherwise it is Dagster's own."""
     t = time.time()
-    proc = subprocess.Popen([sys.executable, str(CODE_DIR / script), *map(str, args)],
+    python = os.environ.get("BENCH_PYTHON", sys.executable)
+    proc = subprocess.Popen([python, str(CODE_DIR / script), *map(str, args)],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             env=_python_env(extra_env))
     tail = []

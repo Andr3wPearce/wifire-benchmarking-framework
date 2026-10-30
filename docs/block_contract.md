@@ -10,7 +10,8 @@ core blocks (`images/core`) are the reference implementations.
 On the WSTC Dagster every step is its own Kubernetes pod, started from the
 block's image (`execution.image` -> `images/wstc/<image>/`). The step writes the
 blocks' code (shipped inside the compiled workflow file) to `/tmp/bench/code`
-and runs the block's file (`execution.code`) with the image's Python:
+and runs the block's file (`execution.code`) with the image's block Python
+(`$BENCH_PYTHON` if the image sets it, else the Python Dagster runs in):
 
     python core_blocks.py <step.json>        # sources, transforms, reference, metrics
     python elmfire_block.py <run_dir>        # models
@@ -103,5 +104,7 @@ for every model.
   **south** edge, so the ELMFIRE adapter flips every grid going in and out.
 - Pin the model's dependencies in its image (pyretechnics needs NumPy 1.26;
   NumPy 2 breaks it at import).
-- Images carry the server's Dagster (dagster 1.13.26, dagster-k8s 0.29.26), since
-  the step process itself runs in them, but not the blocks' code.
+- Images are built FROM the server's Dagster image (`dagster/dagster-k8s:1.13.26`), since
+  the step process itself runs in them, but don't carry the blocks' code. A block that
+  needs another Python (pyretechnics needs >= 3.11; that image is 3.10) gets its own
+  environment in the image and points `BENCH_PYTHON` at it (see images/wstc/elmfire).
