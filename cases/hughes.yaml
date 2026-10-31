@@ -1,0 +1,21 @@
+# The Hughes Fire: reported 10:53 PST, Jan 22 2025, Lake Hughes Rd near Castaic Lake,
+# Los Angeles County; 10,425 acres at containment (CAL FIRE).
+#
+# A case is one fire's facts; workflows (recipes) run on it. See cases/README.md.
+incident: HUGHES
+t0: "2025-01-22T18:53:00Z"          # simulation clock zero (UTC): the reported start
+window_h: 24                         # hours of weather to fetch from t0
+# crs: EPSG:5070                     # the default (CONUS Albers); set it for fires outside the lower 48
+# Until the reference perimeter is in, the domain is given explicitly. With a reference
+# it can go: the domain is then the perimeter's bounding box + domain_buffer_km (default 5).
+domain_wgs84: [-118.70, 34.48, -118.45, 34.68]   # W, S, E, N
+
+ignitions:                           # each is a source a workflow can pick (case_ignition, which: <name>)
+  reported:
+    {lat: 34.553008, lon: -118.56687, time_utc: "2025-01-22T18:53:00Z",
+     source: "CAL FIRE incident page (reported origin)"}
+  # ngfs: {lat: ..., lon: ..., time_utc: ..., source: "NGFS first detection"}   # not yet
+
+reference:                           # the observed perimeter to score against
+  file: references/hughes_final_perimeter.geojson
+  # url: https://...                 # or hosted; sha256: <pin> to refuse a changed file

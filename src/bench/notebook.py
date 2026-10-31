@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 import time
 from pathlib import Path
 
@@ -31,74 +32,79 @@ def show_file(path: Path, lang: str = "yaml") -> None:
 
 
 def plan_tables(cp: dict) -> None:
-    """The compiled plan as three tables: input steps, runs, and what was skipped."""
-    display(Markdown("**Input steps** (each is one asset, one pod)"))
-    display(md_table([{"slot": e["slot"], "step": e["name"], "block": e["block"], "kind": e["kind"],
-                       "image": f"bench-{e['image']}", "why inserted": e.get("reason") or ""}
-                      for e in cp["inputs"]]))
-    if cp["reference"]:
-        display(Markdown(f"**Reference:** `{cp['reference']['block']}` (the observed perimeter)"))
-    display(Markdown(f"**Runs** ({len(cp['runs'])}; each is one partition of `prediction`)"))
-    display(md_table([{"run": k, "model": r["model"], "params": r["params"],
-                       "inputs": r["inputs"] or "-", "image": f"bench-{r['image']}"}
-                      for k, r in sorted(cp["runs"].items())]))
-    if cp["skipped"]:
-        display(Markdown("**Skipped** (the resolver explains why)"))
-        display(md_table([{"model": s["model"], "inputs": s["inputs"], "reason": s["reason"]}
-                          for s in cp["skipped"]]))
-    for w in cp["warnings"]:
-        display(Markdown(f"> warning: {w}"))
+    """The compiled plan: the recipe's steps, then what each fire gets."""
+    display(Markdown("**Steps** (one asset each, partitioned by fire; one pod per step)"))
+    display(md_table([{"slot": a["slot"], "step": a["name"], "block": a["block"], "kind": a["kind"],
+                       "image": f"bench-{a['image']}", "why inserted": a.get("reason") or ""}
+                      for a in cp["assets"]]))
+    m = cp["model"]
+    display(Markdown(f"**Model:** `{m['block']}` with `{json.dumps(m['params'])}` (image `bench-{m['image']}`)  \n"
+                     f"**Reference:** `{cp['reference']['block']}`  \n**Metrics:** "
+                     + ", ".join(f"`{x}`" for x in cp["metrics"])))
+    display(Markdown("**Fires**"))
+    display(md_table([{"fire": name, "domain (W, S, E, N)": f["run"]["run_json"]["case"]["domain_wgs84"],
+                       "t0": f["run"]["run_json"]["case"]["t0"],
+                       "reference": "local file" if name in cp["references"] else
+                                    (f["reference"]["payload"]["case"]["reference"].get("url") or "none")}
+                      for name, f in sorted(cp["fires"].items())]))
+    for fire, ws in cp["warnings"].items():
+        for w in ws:
+            display(Markdown(f"> warning ({fire}): {w}"))
 
 
 def mermaid(cp: dict) -> Markdown:
     """The asset graph as a Mermaid flowchart (JupyterLab 4.1+ draws it)."""
     ids, lines = {}, ["flowchart LR"]
 
-    def node(key, label, cls):
-        nid = f"n{len(ids)}"
-        ids[key] = nid
-        lines.append(f'  {nid}["{label}"]:::{cls}')
-        return nid
+    def node(key, label):
+        ids[key] = f"n{len(ids)}"
+        lines.append(f'  {ids[key]}["{label}"]:::step')
+        return ids[key]
 
-    for e in cp["inputs"]:
-        node(tuple(e["key"]), f"{e['slot']}<br/>{e['block']}", "step")
-        for d in e["deps"]:
-            lines.append(f"  {ids[tuple(d)]} --> {ids[tuple(e['key'])]}")
-    tails = [tuple(e["key"]) for e in cp["inputs"]
-             if not any(tuple(e["key"]) == tuple(d) for o in cp["inputs"] for d in o["deps"])]
-    pred = node("prediction", f"prediction<br/>{len(cp['runs'])} runs", "step")
+    for a in cp["assets"]:
+        node(tuple(a["key"]), f"{a['slot']}<br/>{a['block']}")
+        if a["after"]:
+            lines.append(f"  {ids[tuple(a['after'])]} --> {ids[tuple(a['key'])]}")
+    tails = [tuple(a["key"]) for a in cp["assets"] if not any(a["key"] == b["after"] for b in cp["assets"])]
+    pred = node("prediction", f"prediction<br/>{cp['model']['block']}")
     for t in tails:
         lines.append(f"  {ids[t]} --> {pred}")
-    ref = node("reference", "reference<br/>final perimeter", "step") if cp["reference"] else None
-    rep = node("report", "report", "step")
+    ref = node("reference", "reference<br/>observed perimeter")
+    rep = node("report", "report<br/>one row per fire")
     for m in cp["metrics"]:
-        s = node(f"score/{m}", f"score<br/>{m}", "step")
-        lines.append(f"  {pred} --> {s}")
-        if ref:
-            lines.append(f"  {ref} --> {s}")
-        lines.append(f"  {s} --> {rep}")
-    lines += ["  classDef step fill:#fde3c8,stroke:#c2410c,color:#111"]
+        s = node(f"score/{m}", f"score<br/>{m}")
+        lines += [f"  {pred} --> {s}", f"  {ref} --> {s}", f"  {s} --> {rep}"]
+    lines.append("  classDef step fill:#fde3c8,stroke:#c2410c,color:#111")
     src = "\n".join(lines)
     link = "https://mermaid.live/view#base64:" + base64.urlsafe_b64encode(
-        ('{"code":' + __import__("json").dumps(src) + ',"mermaid":{"theme":"default"}}').encode()).decode()
+        json.dumps({"code": src, "mermaid": {"theme": "default"}}).encode()).decode()
     return Markdown(f"```mermaid\n{src}\n```\n\n_No diagram above? Your Jupyter is older than "
                     f"JupyterLab 4.1; [open it in the Mermaid viewer]({link})._")
 
 
-def identity_table(cp: dict) -> Markdown:
-    rows = [{"step": e["name"], "identity": e["identity"], "artifact (shared volume)": e["path"]}
-            for e in cp["inputs"]]
-    if cp["reference"]:
-        rows.append({"step": "reference", "identity": cp["reference"]["identity"],
-                     "artifact (shared volume)": cp["reference"]["path"]})
+def identity_table(cp: dict, fire: str) -> Markdown:
+    f = cp["fires"][fire]
+    rows = [{"step": s["name"], "identity": s["identity"], "artifact (shared volume)": s["path"]}
+            for s in f["steps"].values()]
+    rows += [{"step": "reference", "identity": f["reference"]["identity"], "artifact (shared volume)": f["reference"]["path"]},
+             {"step": "prediction", "identity": f["run"]["identity"], "artifact (shared volume)": f["run"]["path"]}]
     return md_table(rows)
 
 
-def run_partitions(d, job: str, keys: list[str], tags: dict | None = None, max_parallel: int = 3,
-                   poll: int = 10) -> dict:
-    """Launch one run per partition, at most `max_parallel` at a time (WSTC allows 4 runs
-    across all users). Returns {partition: {"run_id", "status", "seconds"}}."""
-    todo, active, out = list(keys), {}, {}
+def shared_with(cp_a: dict, cp_b: dict, fire: str) -> Markdown:
+    """Which artifacts two workflows share for a fire (same identity = built once)."""
+    a, b = cp_a["fires"][fire]["steps"], cp_b["fires"][fire]["steps"]
+    rows = [{"step": n, "identity": a[n]["identity"],
+             "shared": "yes, built once" if n in b and b[n]["identity"] == a[n]["identity"] else "no"}
+            for n in a]
+    return md_table(rows)
+
+
+def run_fires(d, job: str, fires: list[str], tags: dict | None = None, max_parallel: int = 3,
+              poll: int = 10) -> dict:
+    """Launch one run per fire, at most `max_parallel` at a time (WSTC allows 4 runs across
+    all users). Returns {fire: {"run_id", "status", "seconds"}}."""
+    todo, active, out = list(fires), {}, {}
     while todo or active:
         while todo and len(active) < max_parallel:
             k = todo.pop(0)
@@ -116,10 +122,8 @@ def run_partitions(d, job: str, keys: list[str], tags: dict | None = None, max_p
 
 def asset_rows(results: dict, fields: list[str]) -> list[dict]:
     """d.results(run_id) -> one row per asset with the chosen metadata fields."""
-    rows = []
-    for asset, md in results.items():
-        rows.append({"asset": asset.split("/", 2)[-1], **{f: md.get(f) for f in fields if f in md}})
-    return rows
+    return [{"asset": asset.split("/", 2)[-1], **{f: md.get(f) for f in fields if f in md}}
+            for asset, md in results.items()]
 
 
 def show_previews(previews: dict[str, str], width: int = 520) -> None:

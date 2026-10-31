@@ -18,9 +18,11 @@ sys.path[:0] = [str(ROOT / "src" / "bench"), str(ROOT / "images" / "core"), str(
 import conventions                    # noqa: E402  (shipped next to the blocks in every step)
 import core_blocks as cb              # noqa: E402
 
-CASE = {"incident": "TEST", "crs": "EPSG:5070", "resolution_m": 30, "t0": "2025-01-22T18:53:00Z",
-        "window_h": 6, "domain_wgs84": [-118.66, 34.50, -118.50, 34.62]}
 IGNITION = (34.553008, -118.56687)
+CASE = {"incident": "TEST", "name": "test", "crs": "EPSG:5070", "resolution_m": 30, "t0": "2025-01-22T18:53:00Z",
+        "window_h": 6, "domain_wgs84": [-118.66, 34.50, -118.50, 34.62],
+        "ignitions": {"reported": {"lat": IGNITION[0], "lon": IGNITION[1], "time_utc": "2025-01-22T19:23:00Z",
+                                   "source": "test"}}}
 
 
 def run_block(block, out, **kw):
@@ -69,10 +71,9 @@ def test_wind_directions_rotate_from_true_to_grid_north():
     assert abs(cb.grid_convergence_deg(-96.0, 34.55, "EPSG:5070")) < 0.01
 
 
-def test_ignition_is_reprojected_and_timed_from_t0(tmp_path):
+def test_ignition_comes_from_the_case_is_reprojected_and_timed_from_t0(tmp_path):
     raw = tmp_path / "ign_raw"
-    s = run_block("triangulated_ignition", raw, params={"lat": IGNITION[0], "lon": IGNITION[1],
-                  "time_utc": "2025-01-22T19:23:00Z", "source": "test"})
+    s = run_block("case_ignition", raw, params={"which": "reported"})
     assert s["time_min"] == 30.0
     run_block("reproject", tmp_path / "ign", inputs={"in": str(raw)})
     fc = json.loads((tmp_path / "ign" / "ignition.geojson").read_text())
@@ -83,8 +84,7 @@ def test_chain_elmfire_spreads_downwind_and_is_scored(tmp_path, landscape):
     eb = pytest.importorskip("elmfire_block")
     roads = tmp_path / "roads"
     run_block("roads_override", roads, params={"replacement_fuel": "GR2"}, inputs={"in": str(landscape)})
-    run_block("triangulated_ignition", tmp_path / "ign_raw",
-              params={"lat": IGNITION[0], "lon": IGNITION[1], "time_utc": CASE["t0"], "source": "test"})
+    run_block("case_ignition", tmp_path / "ign_raw", params={"which": "reported"})
     run_block("reproject", tmp_path / "ign", inputs={"in": str(tmp_path / "ign_raw")})
     run_block("fixed_moisture", tmp_path / "moist", params={"dead_1h": 0.04})
     # station-style wind: uniform, hourly, a Santa Ana from the NE (40 deg, grid north)
@@ -105,6 +105,8 @@ def test_chain_elmfire_spreads_downwind_and_is_scored(tmp_path, landscape):
     pred = run_dir / "prediction"
     assert conventions.check_dir(pred, CASE) == []
     assert summary["burned_area_ha"] > 10
+
+    assert summary["stop_time_min"] > 180    # started at the ignition's time (t0 + 30 min)
 
     # a NE wind pushes the fire SW of the ignition
     with __import__("rasterio").open(pred / "time_of_arrival.tif") as src:
@@ -127,3 +129,13 @@ def test_chain_elmfire_spreads_downwind_and_is_scored(tmp_path, landscape):
     assert 0 < iou["iou"] <= 1
     assert iou["intersection_cells"] == summary["burned_cells"]
     assert bias["predicted_ha"] == summary["burned_area_ha"] and bias["area_bias"] < 0
+
+
+def test_a_fire_without_what_a_block_needs_is_unavailable_not_an_error(tmp_path):
+    with pytest.raises(cb.Unavailable, match="no 'ngfs' ignition"):
+        cb.execute({"block": "case_ignition", "case": CASE, "params": {"which": "ngfs"},
+                    "out_dir": str(tmp_path / "ngfs")}, lambda *_: None)
+    assert "unavailable" in json.loads((tmp_path / "ngfs" / "provenance.json").read_text())
+    with pytest.raises(cb.Unavailable, match="no reference"):
+        cb.execute({"block": "final_perimeter", "case": CASE, "params": {}, "inputs": {},
+                    "out_dir": str(tmp_path / "ref")}, lambda *_: None)

@@ -28,8 +28,10 @@ One `step.json`:
 
 ```json
 {"block": "landfire", "kind": "source", "version": "2024",
- "case": {"incident": "HUGHES", "crs": "EPSG:5070", "resolution_m": 30,
-          "t0": "2025-01-22T18:53:00Z", "window_h": 24, "domain_wgs84": [-118.70, 34.48, -118.45, 34.68]},
+ "case": {"incident": "HUGHES", "name": "hughes", "crs": "EPSG:5070", "resolution_m": 30,
+          "t0": "2025-01-22T18:53:00Z", "window_h": 24, "domain_wgs84": [-118.70, 34.48, -118.45, 34.68],
+          "ignitions": {"reported": {"lat": 34.553, "lon": -118.567, "time_utc": "...", "source": "..."}},
+          "reference": {"file": "references/hughes_final_perimeter.geojson"}},
  "params": {}, "selection": {"layers": ["fbfm40", "cc", "ch", "cbh", "cbd", "elevation"]},
  "inputs": {"in": "<absolute dir of the previous step in the chain>"},
  "out_dir": "<absolute dir to write>"}
@@ -40,9 +42,17 @@ One `step.json`:
   line except `block`, `params`, `version`).
 * `inputs`: `in` for a transform or an automatic step; `file` for the reference;
   `prediction` and `reference` for a metric.
+* `case` is the fire's facts (cases/<fire>.yaml) plus the workflow's grid
+  resolution: the case grid, t0, its ignition points, its reference.
 * The block writes canonical artifacts (below) into `out_dir` and returns a
   summary; `core_blocks.execute` adds `provenance.json` with the block, version,
   params, selection, timing and summary. Metrics write `score.json`.
+* **Unavailable:** when the fire lacks what the block needs (the case has no such
+  ignition, no station is in range, there is no reference), the block raises
+  `Unavailable(reason)`. The script then exits with code 3 and prints
+  `unavailable: <reason>`; the framework records that, every later step for the
+  fire is unavailable too, and the workflow's table says why. A network error or
+  a bug is a failure, not "unavailable"; it is retried, never cached.
 
 ## Model contract
 

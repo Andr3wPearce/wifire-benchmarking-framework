@@ -1,0 +1,27 @@
+# ELMFIRE from the first NGFS (GOES) detection, on LANDFIRE 2024 fuels with a roads override,
+# hourly wind from the nearest ASOS station (uniform; no WindNinja yet) and a fixed 6%
+# 1-h dead fuel moisture. Fires whose case has no NGFS detection are "unavailable" here.
+#
+# A workflow is a recipe: one source per input slot, one model with fixed parameters.
+# No fire in it: cases/ holds the fires, and the request picks which ones to run.
+# A different version of the recipe is a different workflow (see elmfire_reported_ignition.yaml).
+
+grid:
+  resolution_m: 30                  # the working grid's cell size (LANDFIRE's native)
+
+inputs:
+  landscape:
+    source: {block: landfire, version: "2024", layers: [fbfm40, cc, ch, cbh, cbd, elevation]}
+    transforms:                     # applied in order to the source's output
+      - {block: roads_override}
+  weather:
+    source: {block: station_wind}
+  moisture:
+    source: {block: fixed_moisture, params: {dead_1h: 0.06}}
+  ignition:
+    source: {block: case_ignition, params: {which: ngfs}}
+
+model: {block: elmfire, params: {duration_min: 600}}
+
+reference: {block: final_perimeter}           # the case's reference perimeter
+metrics: [{block: iou}, {block: area_bias}]

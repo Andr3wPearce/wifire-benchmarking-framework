@@ -14,4 +14,4 @@ or metric means adding a manifest here (and its code), not changing the framewor
 | `params` | each with `type`, `default`, optional `range` (outside it only warns) and `rationale` |
 | `native` | CRS / resolution the block works in. A source whose native CRS differs from the case gets an automatic reproject step |
 | `resources` | models: CPU and memory for their step pod |
-| `execution` | **only for implemented blocks**: `code` (the file with the block's code) and `image` (the image family it runs in, `images/wstc/<image>/`). A block without it is planned but not run: a model is skipped with the reason, and an input that needs it is an error |
+| `execution` | **only for implemented blocks**: `code` (the file with the block's code) and `image` (the image family it runs in, `images/wstc/<image>/`). A workflow that uses a block without it is rejected by the resolver, with the reason |

@@ -1,0 +1,16 @@
+name: case_ignition
+kind: source
+slot: ignition
+description: >
+  One of the case's ignition points (cases/<fire>.yaml, `ignitions.<which>`: lat,
+  lon, time_utc, source). Unavailable for a fire that doesn't have that one, e.g.
+  no NGFS detection for an older fire.
+produces:
+- ignition
+params:
+  which: {type: str, default: reported, rationale: "which of the case's ignitions: reported, ngfs, ..."}
+native:
+  crs: EPSG:4326                  # lat/lon in, so the resolver inserts a reproject step to the case CRS
+execution:
+  code: images/core/core_blocks.py
+  image: core

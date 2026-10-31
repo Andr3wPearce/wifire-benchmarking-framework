@@ -33,6 +33,13 @@ from pathlib import Path
 import numpy as np
 
 UA = {"User-Agent": "scil-bench (UCSD SCIL wildfire spread-model benchmarking)"}
+UNAVAILABLE_EXIT = 3      # exit code meaning "this fire doesn't have what the block needs"
+
+
+class Unavailable(Exception):
+    """Raised by a block when the fire lacks what it needs (no NGFS detection, no weather
+    station in range, no reference perimeter). Not an error: the fire's row in the
+    workflow's table says "unavailable: <reason>", and the steps after it are skipped."""
 
 
 # --------------------------------------------------------------------------- #
@@ -276,7 +283,7 @@ def station_wind(step: dict, log) -> dict:
             break
         log(f"{sid}: only {len(obs)} usable reports, trying the next station")
     else:
-        raise RuntimeError(f"no {network} station within {p.get('max_km', 80)} km has wind for the window")
+        raise Unavailable(f"no {network} station within {p.get('max_km', 80)} km has wind for the window")
 
     conv = grid_convergence_deg(slon, slat, case["crs"])
     series = []
@@ -321,8 +328,13 @@ def fixed_moisture(step: dict, log) -> dict:
 # --------------------------------------------------------------------------- #
 # ignition: a point (lat/lon, UTC time) from an external record
 # --------------------------------------------------------------------------- #
-def ignition_point(step: dict, log) -> dict:
-    out, p, case = Path(step["out_dir"]), step["params"], step["case"]
+def case_ignition(step: dict, log) -> dict:
+    """One of the case's ignition points (case.ignitions.<which>: lat, lon, time_utc, source),
+    in WGS84; the resolver adds the reproject step. Unavailable if the case doesn't have it."""
+    out, which, case = Path(step["out_dir"]), step["params"]["which"], step["case"]
+    p = case.get("ignitions", {}).get(which)
+    if not p:
+        raise Unavailable(f"case {case.get('name', case['incident'])} has no '{which}' ignition")
     when = datetime.fromisoformat(p["time_utc"].replace("Z", "+00:00"))
     minutes = (when - t0(case)).total_seconds() / 60
     out.mkdir(parents=True, exist_ok=True)
@@ -331,8 +343,8 @@ def ignition_point(step: dict, log) -> dict:
         "features": [{"type": "Feature",
                       "properties": {"time_min": minutes, "time_utc": p["time_utc"], "source": p.get("source", "")},
                       "geometry": {"type": "Point", "coordinates": [p["lon"], p["lat"]]}}]}))
-    return {"lat": p["lat"], "lon": p["lon"], "time_utc": p["time_utc"], "time_min": round(minutes, 1),
-            "source": p.get("source", "")}
+    return {"which": which, "lat": p["lat"], "lon": p["lon"], "time_utc": p["time_utc"],
+            "time_min": round(minutes, 1), "source": p.get("source", "")}
 
 
 # --------------------------------------------------------------------------- #
@@ -364,10 +376,27 @@ def reproject(step: dict, log) -> dict:
 # reference: the observed final perimeter, rasterized onto the case grid
 # --------------------------------------------------------------------------- #
 def final_perimeter(step: dict, log) -> dict:
+    """The case's reference perimeter (GeoJSON), rasterized onto the case grid. It comes
+    from the case: `reference.file` (shipped with the compiled workflow) or `reference.url`
+    (downloaded here, and checked against `reference.sha256` when the case pins one)."""
+    import hashlib
     from rasterio.features import rasterize
     from rasterio.warp import transform_geom
     out, case = Path(step["out_dir"]), step["case"]
-    fc = json.loads(Path(step["inputs"]["file"]).read_text())
+    ref = case.get("reference") or {}
+    if step.get("inputs", {}).get("file"):
+        text = Path(step["inputs"]["file"]).read_text()
+    elif ref.get("url"):
+        r = _http().get(ref["url"], timeout=120)
+        r.raise_for_status()
+        text = r.text
+        digest = hashlib.sha256(r.content).hexdigest()
+        if ref.get("sha256") and ref["sha256"] != digest:
+            raise RuntimeError(f"{ref['url']} has changed (sha256 {digest[:12]} != pinned "
+                               f"{ref['sha256'][:12]}): a new perimeter means new scores; update the case")
+    else:
+        raise Unavailable(f"case {case.get('name', case['incident'])} has no reference perimeter")
+    fc = json.loads(text)
     frm = fc.get("crs") or "EPSG:4326"
     if isinstance(frm, dict):
         frm = frm.get("properties", {}).get("name", "EPSG:4326")
@@ -425,25 +454,36 @@ def area_bias(step: dict, log) -> dict:
 
 BLOCKS = {
     "landfire": landfire, "roads_override": roads_override, "station_wind": station_wind,
-    "fixed_moisture": fixed_moisture, "triangulated_ignition": ignition_point,
-    "ngfs_ignition": ignition_point, "reproject": reproject, "final_perimeter": final_perimeter,
+    "fixed_moisture": fixed_moisture, "case_ignition": case_ignition,
+    "reproject": reproject, "final_perimeter": final_perimeter,
     "iou": iou, "area_bias": area_bias,
 }
 
 
 def execute(step: dict, log=print) -> dict:
+    """Run one block and write its provenance. An Unavailable block still writes provenance
+    (with the reason) and re-raises, so the caller can record it as unavailable."""
     t = time.time()
-    summary = BLOCKS[step["block"]](step, log)
     out = Path(step["out_dir"])
-    out.mkdir(parents=True, exist_ok=True)
     prov = {"block": step["block"], "version": step.get("version"),
-            "params": step.get("params", {}), "selection": step.get("selection", {}),
-            "seconds": round(time.time() - t, 1), "summary": summary}
-    (out / "provenance.json").write_text(json.dumps(prov, indent=1, default=str))
+            "params": step.get("params", {}), "selection": step.get("selection", {})}
+    try:
+        summary = BLOCKS[step["block"]](step, log)
+    except Unavailable as e:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "provenance.json").write_text(json.dumps({**prov, "unavailable": str(e)}, indent=1, default=str))
+        raise
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "provenance.json").write_text(json.dumps(
+        {**prov, "seconds": round(time.time() - t, 1), "summary": summary}, indent=1, default=str))
     return summary
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         sys.exit("usage: python core_blocks.py <step.json>")
-    print(json.dumps(execute(json.loads(Path(sys.argv[1]).read_text())), indent=1, default=str))
+    try:
+        print(json.dumps(execute(json.loads(Path(sys.argv[1]).read_text())), indent=1, default=str))
+    except Unavailable as e:
+        print(f"unavailable: {e}")
+        sys.exit(UNAVAILABLE_EXIT)

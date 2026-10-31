@@ -32,14 +32,13 @@ from bench import wstc
 from dagster_client import Dagster
 
 d = Dagster(password=getpass.getpass())
-path, cp = wstc.build_workflow_file("workflows/hughes_red_sky.yaml", "apearce", "deploy/wstc/build",
-                                    wstc.image_refs("a3pearce"))
+path, cp = wstc.build_workflow_file("workflows/elmfire_reported_ignition.yaml", ["hughes"], "apearce",
+                                    "deploy/wstc/build", wstc.image_refs("a3pearce"))
 d.upload(str(path))
 jobs = wstc.job_names("apearce", cp["workflow"])
-d.run(jobs["inputs"], tags={"bench/lfps_email": "you@ucsd.edu"})
-for key in cp["runs"]:
-    d.run(jobs["runs"], tags={"dagster/partition": key})
-d.run(jobs["report"])
+for fire in cp["fires"]:                      # one run per fire: inputs, model, scores
+    d.run(jobs["run"], tags={"dagster/partition": fire, "bench/lfps_email": "you@ucsd.edu"})
+d.run(jobs["report"])                         # the table: one row per fire
 ```
 
 If a run fails: `d.errors(run_id)`, `d.logs(run_id)`, or the run's page

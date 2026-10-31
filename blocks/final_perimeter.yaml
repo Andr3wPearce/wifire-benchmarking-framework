@@ -1,8 +1,9 @@
 name: final_perimeter
 kind: reference
 description: >
-  The observed final perimeter, from a GeoJSON file the workflow names
-  (reference.file), rasterized onto the case grid for scoring.
+  The case's observed perimeter (cases/<fire>.yaml, `reference`: a local GeoJSON
+  `file`, or a hosted `url` with an optional `sha256` pin), rasterized onto the
+  case grid for scoring. Unavailable for a fire with no reference.
 observes:
 - perimeter
 execution:
