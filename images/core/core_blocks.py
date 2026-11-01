@@ -63,8 +63,18 @@ def write_tif(path: Path, arr: np.ndarray, transform, crs: str, nodata=None) -> 
 
 
 def _http():
+    """A requests session that retries: public services (the Iowa Mesonet, LFPS) time out
+    or return 5xx now and then, and a blip shouldn't fail the run. Up to 4 retries per
+    request (timeouts, dropped connections, 429/5xx), waiting 10, 20, 40 s in between.
+    Not part of any artifact's identity: retrying doesn't change what is produced."""
     import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    retry = Retry(total=4, connect=4, read=4, status=4, backoff_factor=5,
+                  status_forcelist=(429, 500, 502, 503, 504), allowed_methods=("GET", "POST"))
     s = requests.Session()
+    s.mount("https://", HTTPAdapter(max_retries=retry))
+    s.mount("http://", HTTPAdapter(max_retries=retry))
     s.headers.update(UA)
     return s
 
@@ -251,7 +261,7 @@ def station_wind(step: dict, log) -> dict:
     w, s, e, n = case["domain_wgs84"]
     lat0, lon0 = (s + n) / 2, (w + e) / 2
     network = p.get("network") or "CA_ASOS"
-    stations = http.get(f"{IEM}/geojson/network/{network}.geojson", timeout=60).json()["features"]
+    stations = http.get(f"{IEM}/geojson/network/{network}.geojson", timeout=120).json()["features"]
     cands = []
     for f in stations:
         lon, lat = f["geometry"]["coordinates"][:2]
