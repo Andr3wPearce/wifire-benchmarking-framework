@@ -61,7 +61,7 @@ def test_a_workflow_is_one_recipe(tmp_path):
     with pytest.raises(ValueError, match="one recipe"):
         load_workflow(two)
     sweep = tmp_path / "sweep.yaml"
-    sweep.write_text(WORKFLOW.read_text().replace("duration_min: 600", "duration_min: [300, 600]"))
+    sweep.write_text(WORKFLOW.read_text().replace("duration_min: 180", "duration_min: [180, 600]"))
     with pytest.raises(ValueError, match="one recipe"):
         load_workflow(sweep)
 
@@ -85,7 +85,7 @@ def test_plan_has_one_branch_per_slot_and_reprojects_lat_lon_ignitions():
     p = plan()
     assert [s["step"] for s in p["slots"]["ignition"]] == ["ignition.case_ignition", "ignition.auto_reproject"]
     assert [s["step"] for s in p["slots"]["weather"]] == ["weather.station_wind"]
-    assert p["model"]["block"] == "elmfire" and p["model"]["params"]["duration_min"] == 600
+    assert p["model"]["block"] == "elmfire" and p["model"]["params"]["duration_min"] == 180
 
 
 def test_recipes_that_cant_run_are_rejected_with_the_reason():

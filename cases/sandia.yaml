@@ -1,0 +1,22 @@
+# The Sandia Fire, Oct 7 2025: San Diego County (CAL FIRE San Diego unit, ~23-30 acres).
+# Built from the WIFIRE Consolidated Fire Groupings 2025 geopackage,
+# fire_group 145_CA-SDU-SANDIA-20251007-1551_None.
+#
+# A case is one fire's facts; workflows (recipes) run on it. See cases/README.md.
+incident: SANDIA
+t0: "2025-10-07T22:20:06Z"          # simulation clock zero (UTC): IRWIN discovery (2025-CASDU-021862)
+window_h: 24
+# no domain_wgs84: the domain is the reference perimeter's bounding box + domain_buffer_km (5 km)
+
+ignitions:
+  reported:                          # the ignition the earlier benchmark used (geopackage Centers layer)
+    {lat: 33.446984, lon: -117.262573, time_utc: "2025-10-07T22:51:00Z",
+     source: "WIFIRE Consolidated Fire Groupings 2025, Centers (fire_start)"}
+  ngfs:                              # first NGFS (GOES) detection; NGFS times are Pacific, converted to UTC
+    {lat: 33.450001, lon: -117.26667, time_utc: "2025-10-07T22:46:00Z",
+     source: "WIFIRE Consolidated Fire Groupings 2025, NGFS (first detection 15:46 PDT)"}
+
+reference:
+  file: references/sandia_perimeter.geojson
+  observed_utc: "2025-10-08T00:18:00Z"   # "sandia4": 30.4 acres, 118 min after t0 (the last valid perimeter)
+  source: "FIRIS perimeter (geopackage Perimeters id 14868)"

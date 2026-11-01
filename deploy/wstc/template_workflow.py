@@ -347,7 +347,7 @@ def report(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
             if s and s.get("unavailable") and row["status"] == "done":
                 row["status"] = f"not scored: {s['unavailable']}"
             elif s:
-                row.update({k: v for k, v in s.get("summary", {}).items() if k in (m, "observed_ha")})
+                row.update({k: v for k, v in s.get("summary", {}).items() if k in (m, "observed_ha", "scored_at_min")})
         rows.append(row)
     cols = list(dict.fromkeys(c for r in rows for c in r))
     table = "| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n" + "\n".join(

@@ -139,3 +139,30 @@ def test_a_fire_without_what_a_block_needs_is_unavailable_not_an_error(tmp_path)
     with pytest.raises(cb.Unavailable, match="no reference"):
         cb.execute({"block": "final_perimeter", "case": CASE, "params": {}, "inputs": {},
                     "out_dir": str(tmp_path / "ref")}, lambda *_: None)
+
+
+def test_scores_are_taken_at_the_reference_observation_time(tmp_path):
+    """A perimeter observed 60 min after t0 is compared with what the model burned by minute 60."""
+    transform, shape = conventions.case_grid(CASE)
+    pred, ref = tmp_path / "pred", tmp_path / "ref"
+    pred.mkdir(), ref.mkdir()
+    toa = np.full(shape, np.nan, "float32")
+    toa[0:10, 0:10] = 30                                   # burned by minute 30
+    toa[10:20, 0:10] = 90                                  # burned at minute 90, after the observation
+    cb.write_tif(pred / "time_of_arrival.tif", toa, transform, CASE["crs"])
+    (pred / "summary.json").write_text(json.dumps({"stop_time_min": 180}))
+    burned = np.zeros(shape, "uint8")
+    burned[0:10, 0:10] = 1
+    cb.write_tif(ref / "burned.tif", burned, transform, CASE["crs"])
+    inputs = {"prediction": str(pred), "reference": str(ref)}
+
+    def score(observed, stop=180):
+        (pred / "summary.json").write_text(json.dumps({"stop_time_min": stop}))
+        case = {**CASE, "reference": {"observed_utc": observed}} if observed else CASE
+        return cb.iou({"case": case, "inputs": inputs, "out_dir": str(tmp_path / "s")}, None)
+
+    assert score("2025-01-22T19:53:00Z") == {"iou": 1.0, "intersection_cells": 100, "union_cells": 100,
+                                             "scored_at_min": 60.0}
+    assert score(None)["iou"] == 0.5                       # no observation time: everything burned
+    with pytest.raises(cb.Unavailable, match="longer duration_min"):
+        score("2025-01-22T23:53:00Z")                      # observed at 300 min, the run stopped at 180

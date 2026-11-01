@@ -21,7 +21,7 @@ inputs:
   ignition:
     source: {block: case_ignition, params: {which: reported}}
 
-model: {block: elmfire, params: {duration_min: 600}}
+model: {block: elmfire, params: {duration_min: 180}}   # scored at each reference's observation time (<= 180 min)
 
 reference: {block: final_perimeter}           # the case's reference perimeter
 metrics: [{block: iou}, {block: area_bias}]

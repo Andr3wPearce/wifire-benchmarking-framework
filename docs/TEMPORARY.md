@@ -18,8 +18,8 @@ Tag new temporary code the same way, on the line (or the comment above it).
 | Limit | Why | Next |
 |---|---|---|
 | The fires are fixed when a workflow is compiled | static partitions | dynamic partitions once there is an API, so adding a fire doesn't mean re-uploading |
-| Cases are written by hand | one fire so far | generate them from the lab's benchmark geopackage (Centers, NGFS, IRWIN, Perimeters layers) |
-| Metrics score everything the model burned | the reference has no observation time yet | score at the perimeter's observation time; default the duration and weather window to it |
+| Cases are written by hand | two fires so far | generate them from the lab's benchmark geopackage (Centers, NGFS, IRWIN, Perimeters layers) |
+| The model's `duration_min` is set by hand in the workflow | one value per recipe | default it from each case's `reference.observed_utc` (scoring already happens at that time; a run that ends too early is unavailable) |
 | One Dagster run per fire | fine for a few fires; WSTC allows 4 runs at once for everyone | batch many fires into one run |
 | Runs are launched from the notebook | there is no API yet | the API takes "workflow X on fires A, B, C" |
 | FARSITE, WindNinja, WRF-Fire have manifests only | not implemented | a workflow naming them is rejected by the resolver with the reason |

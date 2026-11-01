@@ -11,4 +11,4 @@ facts, never choices about how to model it (those are workflows).
 | `crs` | no (EPSG:5070) | the working CRS; CONUS Albers by default |
 | `domain_wgs84` | no | [W, S, E, N]. Without it, the domain is the reference perimeter's bounding box + `domain_buffer_km` (default 5 km) |
 | `ignitions.<name>` | no | `lat`, `lon`, `time_utc`, `source`. A workflow picks one by name (`case_ignition`, `which: <name>`); a fire without it is "unavailable" for that workflow |
-| `reference` | no | `file` (a local GeoJSON, any CRS named in the file, WGS84 if not) or `url` (hosted; `sha256` pins the exact version). Without it, scores are "unavailable" |
+| `reference` | no | `file` (a local GeoJSON in WGS84; one observation) or `url` (hosted; `sha256` pins the exact version), plus `observed_utc` (when it was observed: the prediction is scored at that time) and `source`. Without it, scores are "unavailable" |

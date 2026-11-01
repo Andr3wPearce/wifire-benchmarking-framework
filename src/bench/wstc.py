@@ -262,6 +262,7 @@ def build_workflow_file(workflow_path: Path, cases: list[str] | None, me: str, o
                  "__PLAN__": repr(json.dumps(cp)), "__CODE__": repr(code)}.items():
         src = src.replace(k, v)
     out = Path(out_dir) / f"{me}_{cp['workflow']}.py"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(src)
     if out.stat().st_size > UPLOAD_LIMIT:
         raise ValueError(f"{out.name} is {out.stat().st_size:,} bytes; the upload limit is {UPLOAD_LIMIT:,}")

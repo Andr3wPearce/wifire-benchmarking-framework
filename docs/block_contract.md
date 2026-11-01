@@ -29,9 +29,9 @@ One `step.json`:
 ```json
 {"block": "landfire", "kind": "source", "version": "2024",
  "case": {"incident": "HUGHES", "name": "hughes", "crs": "EPSG:5070", "resolution_m": 30,
-          "t0": "2025-01-22T18:53:00Z", "window_h": 24, "domain_wgs84": [-118.70, 34.48, -118.45, 34.68],
+          "t0": "2025-01-22T18:37:24Z", "window_h": 24, "domain_wgs84": [-118.70, 34.48, -118.45, 34.68],
           "ignitions": {"reported": {"lat": 34.553, "lon": -118.567, "time_utc": "...", "source": "..."}},
-          "reference": {"file": "references/hughes_final_perimeter.geojson"}},
+          "reference": {"file": "references/hughes_perimeter.geojson", "observed_utc": "2025-01-22T21:04:31Z"}},
  "params": {}, "selection": {"layers": ["fbfm40", "cc", "ch", "cbh", "cbd", "elevation"]},
  "inputs": {"in": "<absolute dir of the previous step in the chain>"},
  "out_dir": "<absolute dir to write>"}
@@ -62,7 +62,7 @@ A run directory containing `run.json`:
 {
   "model": "elmfire", "block_version": "pyretechnics-2026.10.20", "run_id": "36204b2bee",
   "case":   {"incident": "HUGHES", "crs": "EPSG:5070", "resolution_m": 30, "t0": "...", "domain_wgs84": [...]},
-  "params": {"spread_adjustment": 1.5, "duration_min": 600, "band_duration_min": 60},
+  "params": {"spread_adjustment": 1.5, "duration_min": 180, "band_duration_min": 60},
   "inputs": {"landscape": "HUGHES/landscape/roads_override-2f329b0d69", "weather": "...",
              "moisture": "...", "ignition": "..."}
 }

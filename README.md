@@ -13,7 +13,7 @@ comparing their tables.
 
 The end-to-end example is [`notebooks/red_sky.ipynb`](notebooks/red_sky.ipynb):
 ELMFIRE on real LANDFIRE fuels and station wind, run on the Hughes Fire (January
-2025), plus a second recipe (a different ignition source) to show what is shared
+2025) and the Sandia Fire (October 2025), plus a second recipe (a different ignition source) to show what is shared
 and what a fire can't provide.
 
 ## The idea in four parts
@@ -63,7 +63,7 @@ reason, instead of failing.
 ```
 blocks/              block manifests (+ README: the manifest fields)
 workflows/           recipes: elmfire_reported_ignition, elmfire_ngfs_ignition
-cases/               fires (+ README: the case fields); hughes.yaml
+cases/               fires (+ README: the case fields); hughes.yaml, sandia.yaml
 references/          observed perimeters the cases point at (GeoJSON), until they are hosted
 images/core/         the Python-only blocks: LANDFIRE, roads override, station wind,
                      moisture, the case's ignition points, reproject, reference, IoU, area bias
@@ -97,8 +97,8 @@ tests/               test_framework.py (resolver, identity, compile), test_block
    `pip install -e .`, then run top to bottom. It asks for the WSTC dashboard
    password and an email for LANDFIRE's service (a run tag, not stored in code).
 3. **A fire's reference perimeter** is named in its case: a local GeoJSON in
-   `references/` (any CRS, as long as the GeoJSON says which; WGS84 if not) or a
-   hosted `url`. Without it the runs still run; the scores say there is no reference.
+   `references/` (WGS84) or a hosted `url`, with `observed_utc`: the prediction is
+   scored at that time. Without it the runs still run; the scores say there is no reference.
 
 ## Adding things
 
@@ -122,6 +122,5 @@ and is skipped without them.
 ## Not yet
 
 See [docs/TEMPORARY.md](docs/TEMPORARY.md). In short: finished artifacts move to the
-S3 bucket; cases are generated from the lab's benchmark geopackage; metrics score at
-the reference perimeter's observation time; FARSITE, WindNinja and WRF-Fire get
+S3 bucket; cases are generated from the lab's benchmark geopackage; FARSITE, WindNinja and WRF-Fire get
 implementations.
