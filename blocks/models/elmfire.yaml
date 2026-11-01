@@ -3,7 +3,7 @@ kind: model
 version: pyretechnics-2026.10.20
 description: >
   ELMFIRE-style level-set spread model, via SIG's pyretechnics. The adapter
-  (images/elmfire/elmfire_block.py) converts canonical inputs into
+  (blocks/models/elmfire.py) converts canonical inputs into
   pyretechnics' space-time cubes and its outputs back into a canonical
   Prediction.
 requires:
@@ -46,5 +46,4 @@ resources:
   cpu: 2
   memory_gb: 6
 execution:
-  code: images/elmfire/elmfire_block.py
   image: elmfire

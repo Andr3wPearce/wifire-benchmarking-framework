@@ -19,7 +19,7 @@ from __future__ import annotations
 from .registry import BLOCKS
 
 PY_TYPES = {"float": (int, float), "int": (int,), "bool": (bool,), "str": (str,)}
-# steps the resolver inserts itself; the framework implements them (images/core/core_blocks.py)
+# steps the resolver inserts itself; their code is in blocks/<kind>/ with no manifest (blocks/transforms/reproject.py)
 AUTO_BLOCKS = {"reproject"}
 
 

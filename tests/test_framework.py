@@ -132,6 +132,25 @@ def test_landfire_identity_ignores_what_cannot_change_it():
     assert wider["landscape.roads_override"] != base["landscape.roads_override"]
 
 
+def test_a_blocks_identity_is_its_file_and_the_shared_code_that_shapes_its_data():
+    names = lambda b: {f.name for f in wstc.code_closure(wstc.block_code(b))}
+    assert names("landfire") == {"landfire.py", "blockkit.py", "http_session.py", "conventions.py"}
+    assert names("iou") == {"iou.py", "scoring.py", "blockkit.py", "conventions.py"}
+    assert names("elmfire") == {"elmfire.py"}
+    # the HTTP session (retries) ships with landfire but is not part of its identity
+    assert "http_session" in wstc.NOT_IN_IDENTITY and "run_block" in wstc.NOT_IN_IDENTITY
+    hashes = {b: wstc.block_code_hash(b) for b in ["landfire", "station_wind", "iou", "area_bias", "reproject"]}
+    assert len(set(hashes.values())) == len(hashes)
+
+
+def test_block_folders_match_kinds(tmp_path):
+    from bench.registry import load_blocks
+    (tmp_path / "metrics").mkdir()
+    (tmp_path / "metrics" / "landfire.yaml").write_text("name: landfire\nkind: source\n")
+    with pytest.raises(ValueError, match="belongs in blocks/sources/"):
+        load_blocks(tmp_path)
+
+
 # ---------------------------------------------------------------- compiled WSTC file
 def test_compiled_file_partitions_by_fire_and_gives_each_step_its_blocks_image(tmp_path):
     pytest.importorskip("dagster")
@@ -149,7 +168,10 @@ def test_compiled_file_partitions_by_fire_and_gives_each_step_its_blocks_image(t
     image_of = lambda a: json.loads(a.op.tags["dagster-k8s/config"])["container_config"]["image"]
     assert image_of(mod.prediction) == images["elmfire"]
     assert all(image_of(a) == images["core"] for a in mod.input_assets + mod.score_assets)
-    assert set(mod.CODE) == {"core_blocks.py", "elmfire_block.py", "conventions.py", "previews.py"}
+    assert set(mod.CODE) == {"landfire.py", "roads_override.py", "station_wind.py", "fixed_moisture.py",
+                             "case_ignition.py", "reproject.py", "elmfire.py", "final_perimeter.py",
+                             "iou.py", "area_bias.py", "scoring.py", "blockkit.py", "http_session.py",
+                             "run_block.py", "conventions.py", "previews.py"}
 
 
 # ---------------------------------------------------------------- conventions

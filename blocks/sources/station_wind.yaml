@@ -13,5 +13,4 @@ params:
   network: {type: str, default: CA_ASOS, rationale: IEM network to search}
   max_km: {type: float, default: 80, rationale: farthest station considered}
 execution:
-  code: images/core/core_blocks.py
   image: core

@@ -1,9 +1,0 @@
-name: area_bias
-kind: metric
-description: (predicted - observed) / observed burned area (0 = perfect, -0.5 = half the observed area).
-needs:                            # a prediction and the reference, both as burned area
-- perimeter
-- perimeter
-execution:
-  code: images/core/core_blocks.py
-  image: core

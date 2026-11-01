@@ -13,5 +13,4 @@ params:
     range: [0.02, 0.35]
     rationale: fraction (kg water / kg dry fuel)
 execution:
-  code: images/core/core_blocks.py
   image: core

@@ -33,7 +33,7 @@ ME = "__ME__"
 WF = "__WF__"
 IMAGES = __IMAGES__              # {image family: image reference}
 PLAN = json.loads(__PLAN__)      # bench.wstc.compile_plan(...)
-CODE = __CODE__                  # {file name: source} of the blocks used + conventions + previews
+CODE = __CODE__                  # {file name: source}: the blocks used, blocks/lib, conventions, previews
 
 # TEMP(shared-volume): the artifact store. Kai: not backed up, 10 GiB shared by everyone;
 # finished artifacts move to the S3 bucket (wstc-dagster) next, under the same identity paths.
@@ -161,12 +161,13 @@ def _upstream_unavailable(paths: dict) -> str | None:
     return None
 
 
-def _run_step(context, script: str, step: dict, tmp: Path, extra_env: dict | None = None) -> dict:
-    """Run a core block on its step.json (docs/block_contract.md) and return its summary."""
+def _run_step(context, step: dict, tmp: Path, extra_env: dict | None = None) -> dict:
+    """Run a non-model block on its step.json (docs/block_contract.md) with the shipped
+    runner (run_block.py imports <block>.py and calls its run()), and return its summary."""
     step_file = tmp.parent / f"{tmp.name}.step.json"
     step_file.write_text(json.dumps({**step, "out_dir": str(tmp)}))
     try:
-        _run(context, script, step_file, extra_env=extra_env)
+        _run(context, "run_block.py", step_file, extra_env=extra_env)
     finally:
         step_file.unlink(missing_ok=True)
     return json.loads((tmp / "provenance.json").read_text()).get("summary", {})
@@ -214,7 +215,7 @@ def _input_asset(asset: dict):
                 raise _Unavailable(why)
             step = {**st["payload"], "inputs": {k: str(ART / v) for k, v in st["input_paths"].items()}}
             email = context.run.tags.get(TAG_EMAIL, "")
-            return _run_step(context, asset["code"], step, tmp, {"BENCH_LFPS_EMAIL": email} if email else None)
+            return _run_step(context, step, tmp, {"BENCH_LFPS_EMAIL": email} if email else None)
         done, reused = _materialize(context, st["path"], st["payload"]["case"], build)
         return dg.MaterializeResult(metadata=_provenance(done, reused, st["path"], st["identity"]))
     return _a
@@ -238,7 +239,7 @@ def reference(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
             src.write_text(text)
             inputs["file"] = str(src)
         try:
-            return _run_step(context, REF["code"], {**ref["payload"], "inputs": inputs}, tmp)
+            return _run_step(context, {**ref["payload"], "inputs": inputs}, tmp)
         finally:
             if inputs:
                 Path(inputs["file"]).unlink(missing_ok=True)
@@ -313,7 +314,7 @@ def _score_asset(metric: str):
             step = {"block": metric, "kind": "metric", "case": fire["run"]["run_json"]["case"], "params": {},
                     "inputs": {"prediction": str(ART / needs["prediction"] / "prediction"),
                                "reference": str(ART / needs["reference"])}}
-            _run_step(context, spec["code"], step, tmp)
+            _run_step(context, step, tmp)
             return json.loads((tmp / "score.json").read_text())
         path = fire["scores"][metric]
         done, reused = _materialize(context, path, fire["run"]["run_json"]["case"], build)

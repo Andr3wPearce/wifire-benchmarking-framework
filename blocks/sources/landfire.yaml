@@ -17,5 +17,4 @@ native:
   crs: EPSG:5070                  # requested from LFPS in the case CRS, so no reproject step
   resolution_m: 30
 execution:
-  code: images/core/core_blocks.py
   image: core

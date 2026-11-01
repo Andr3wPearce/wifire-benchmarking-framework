@@ -12,5 +12,4 @@ params:
 native:
   crs: EPSG:4326                  # lat/lon in, so the resolver inserts a reproject step to the case CRS
 execution:
-  code: images/core/core_blocks.py
   image: core

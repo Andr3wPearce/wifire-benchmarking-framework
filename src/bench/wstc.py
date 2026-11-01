@@ -94,11 +94,11 @@ def image_published(ref: str) -> bool | None:
 
 def block_image(block: str) -> str:
     """The image family a block runs in (its manifest's execution.image). The resolver's
-    automatic steps (reproject) are core blocks."""
+    automatic steps (reproject) run in the core image."""
     return BLOCKS.get(block, {}).get("execution", {}).get("image", "core")
 
 
-# what a step asks Kubernetes for unless its manifest says otherwise: the core blocks
+# what a step asks Kubernetes for unless its manifest says otherwise: the non-model blocks
 # move a few MB of rasters, so this is plenty (and keeps us under the shared quota)
 DEFAULT_RESOURCES = {"cpu": 0.5, "memory_gb": 1}
 
@@ -112,39 +112,71 @@ def k8s_resources(block: str) -> dict:
             "limits": {"cpu": f"{cpu * 1.2:g}", "memory": f"{int(mem_mi * 1.2)}Mi"}}
 
 
+# --------------------------------------------------------------------------- #
+# block code: what ships with a workflow, and what goes into identities
+# --------------------------------------------------------------------------- #
+BLOCKS_DIR = ROOT / "blocks"
+# steps the resolver inserts itself: code next to the other blocks of their kind, no manifest
+AUTO_STEP_CODE = {"reproject": BLOCKS_DIR / "transforms" / "reproject.py"}
+# the step runner for every non-model block (python run_block.py <step.json>)
+RUNNER = BLOCKS_DIR / "lib" / "run_block.py"
+# shared modules that don't shape any artifact's content, so changing them rebuilds nothing:
+# the HTTP session (retries) and the runner (provenance)
+NOT_IN_IDENTITY = {"http_session", "run_block"}
+
+
 def block_code(block: str) -> Path:
-    """The file holding a block's code (its manifest's execution.code)."""
-    return ROOT / BLOCKS.get(block, {}).get("execution", {}).get("code", "images/core/core_blocks.py")
+    """The file holding a block's code: blocks/<kind>/<name>.py (the registry fills it in
+    as the manifest's execution.code), or the automatic step's file."""
+    if block in AUTO_STEP_CODE:
+        return AUTO_STEP_CODE[block]
+    code = BLOCKS.get(block, {}).get("execution", {}).get("code")
+    if not code:
+        raise ValueError(f"block '{block}' has no code (no execution: in its manifest)")
+    return ROOT / code
 
 
-# --------------------------------------------------------------------------- #
-# identity
-# --------------------------------------------------------------------------- #
-def _function_sources(path: Path) -> dict[str, str]:
-    """Top-level function name -> its source text (read with ast; nothing is imported)."""
-    text = path.read_text()
-    return {n.name: ast.get_source_segment(text, n) for n in ast.parse(text).body
-            if isinstance(n, ast.FunctionDef)}
+def _shared_modules() -> dict[str, Path]:
+    """Modules a block may import that aren't blocks themselves: blocks/lib/*.py, helpers
+    kept with the blocks that use them (blocks/metrics/scoring.py), and the framework's
+    conventions. {module name: file}."""
+    blocks = {block_code(b) for b in BLOCKS if BLOCKS[b].get("execution")} | set(AUTO_STEP_CODE.values())
+    mods = {f.stem: f for f in sorted(BLOCKS_DIR.glob("*/*.py")) if f not in blocks}
+    mods.update({f.stem: f for f in FRAMEWORK_CODE})
+    return mods
 
 
-# core blocks whose function name differs from the block name
-CORE_FUNCTION: dict[str, str] = {}
-# helpers in core_blocks.py / conventions.py that shape every core block's output
-CORE_HELPERS = ["t0", "write_tif", "_read", "_masks", "_write_score", "_copy_tree", "grid_convergence_deg"]
+def _imports(path: Path) -> set[str]:
+    """Top-level module names a file imports (read with ast; nothing is imported)."""
+    names = set()
+    for n in ast.walk(ast.parse(path.read_text())):
+        if isinstance(n, ast.Import):
+            names |= {a.name.split(".")[0] for a in n.names}
+        elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
+            names.add(n.module.split(".")[0])
+    return names
+
+
+def code_closure(path: Path) -> list[Path]:
+    """A code file plus every shared module it imports, directly or not."""
+    shared, seen, todo = _shared_modules(), {}, [path]
+    while todo:
+        f = todo.pop()
+        if f.stem in seen:
+            continue
+        seen[f.stem] = f
+        todo += [shared[m] for m in _imports(f) if m in shared]
+    return sorted(seen.values())
 
 
 def block_code_hash(block: str) -> str:
-    """Hash of the code that produces a block's artifacts, so changing it invalidates them.
-
-    Models hash their whole adapter file. Core blocks hash only their own function
-    plus the shared helpers and the case grid, so fixing the wind block does not
-    re-download LANDFIRE."""
-    path = block_code(block)
-    if path.name != "core_blocks.py":
-        return _h(path.read_text())
-    fns = _function_sources(path)
-    grid = _function_sources(ROOT / "src" / "bench" / "conventions.py")["case_grid"]
-    return _h([fns[CORE_FUNCTION.get(block, block)], *(fns[k] for k in CORE_HELPERS if k in fns), grid])
+    """Hash of the code that produces a block's artifacts, so changing it invalidates them:
+    the block's own file plus every shared module it imports (blockkit, scoring,
+    conventions), except the ones that don't shape the data (NOT_IN_IDENTITY). Fixing
+    the wind block therefore doesn't re-download LANDFIRE, and adding retries to the
+    HTTP session rebuilds nothing."""
+    files = [f for f in code_closure(block_code(block)) if f.stem not in NOT_IN_IDENTITY]
+    return _h([[str(f.relative_to(ROOT)), f.read_text()] for f in files])
 
 
 def _case_for(slot: str, case: dict) -> dict:
@@ -254,8 +286,13 @@ def build_workflow_file(workflow_path: Path, cases: list[str] | None, me: str, o
     if missing:
         raise ValueError(f"no image given for families {missing}")
     used = {a["block"] for a in cp["assets"]} | {cp["model"]["block"], cp["reference"]["block"]} | set(cp["metrics"])
-    code_files = {block_code(b) for b in used} | set(FRAMEWORK_CODE)
-    code = {f.name: f.read_text() for f in sorted(code_files)}
+    code_files = {f for b in used for f in code_closure(block_code(b))}
+    code_files |= set(code_closure(RUNNER)) | set(FRAMEWORK_CODE)
+    names = [f.name for f in code_files]
+    clash = sorted({n for n in names if names.count(n) > 1})
+    if clash:   # every file lands in one directory in the step's pod
+        raise ValueError(f"two code files share a name: {clash}")
+    code = {f.name: f.read_text() for f in sorted(code_files, key=lambda f: f.name)}
     src = TEMPLATE.read_text()
     for k, v in {"__ME__": me, "__WF__": cp["workflow"],
                  "__IMAGES__": repr({f: images[f] for f in cp["image_families"]}),

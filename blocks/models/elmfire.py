@@ -14,7 +14,7 @@ the SOUTH edge (so every grid is flipped in and out), wants wind in km/h, and ca
 the wind's "from" direction `upwind_direction`.
 
 Dependencies: pyretechnics (NumPy 1.26), rasterio (images/wstc/elmfire).
-Runs standalone for debugging:  python elmfire_block.py <run_dir>
+Runs standalone for debugging:  python elmfire.py <run_dir>
 """
 from __future__ import annotations
 
@@ -241,7 +241,7 @@ def execute(run_dir: Path, log, root: Path | None = None) -> dict:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        sys.exit("usage: python elmfire_block.py <run_dir containing run.json>")
+        sys.exit("usage: python elmfire.py <run_dir containing run.json>")
     print(json.dumps(execute(Path(sys.argv[1]), print), indent=2))
 
 

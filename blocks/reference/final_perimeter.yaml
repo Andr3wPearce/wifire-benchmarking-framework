@@ -7,5 +7,4 @@ description: >
 observes:
 - perimeter
 execution:
-  code: images/core/core_blocks.py
   image: core

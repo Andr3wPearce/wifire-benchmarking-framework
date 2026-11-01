@@ -14,9 +14,11 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("rasterio")
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "src" / "bench"), str(ROOT / "images" / "core"), str(ROOT / "images" / "elmfire")]
+# in a step every code file sits in one directory; here, put each folder on the path instead
+sys.path[:0] = [str(ROOT / "src" / "bench"), *(str(d) for d in sorted((ROOT / "blocks").iterdir()) if d.is_dir())]
+import blockkit as kit                # noqa: E402
 import conventions                    # noqa: E402  (shipped next to the blocks in every step)
-import core_blocks as cb              # noqa: E402
+import run_block as runner            # noqa: E402
 
 IGNITION = (34.553008, -118.56687)
 CASE = {"incident": "TEST", "name": "test", "crs": "EPSG:5070", "resolution_m": 30, "t0": "2025-01-22T18:53:00Z",
@@ -26,8 +28,8 @@ CASE = {"incident": "TEST", "name": "test", "crs": "EPSG:5070", "resolution_m": 
 
 
 def run_block(block, out, **kw):
-    """Run a core block the way a step does, then check its artifact like the framework does."""
-    summary = cb.execute({"block": block, "case": CASE, "out_dir": str(out), **kw}, lambda *_: None)
+    """Run a block the way a step does, then check its artifact like the framework does."""
+    summary = runner.execute({"block": block, "case": CASE, "out_dir": str(out), **kw}, lambda *_: None)
     assert conventions.check_dir(out, CASE) == [], block
     return summary
 
@@ -46,7 +48,7 @@ def landscape(tmp_path):
     for name, arr in {"fuel_model_fbfm40": fuel, "elevation": np.full(shape, 500, "float32"),
                       "canopy_cover": zeros, "canopy_height": zeros, "canopy_base_height": zeros,
                       "canopy_bulk_density": zeros}.items():
-        cb.write_tif(d / f"{name}.tif", arr, transform, CASE["crs"])
+        kit.write_tif(d / f"{name}.tif", arr, transform, CASE["crs"])
     return d
 
 
@@ -60,15 +62,15 @@ def test_case_grid_is_snapped_north_up_and_covers_the_domain():
 def test_roads_override_replaces_roads_but_not_water(tmp_path, landscape):
     s = run_block("roads_override", tmp_path / "roads", params={"replacement_fuel": "GR2"},
                   inputs={"in": str(landscape)})
-    fuel = cb._read(tmp_path / "roads" / "fuel_model_fbfm40.tif")
+    fuel = kit.read_tif(tmp_path / "roads" / "fuel_model_fbfm40.tif")
     assert s["cells_changed"] > 0 and not np.isin(fuel, [91]).any()
     assert (fuel == 98).sum() == 40 * 60                   # the lake is untouched
 
 
 def test_wind_directions_rotate_from_true_to_grid_north():
     # west of EPSG:5070's central meridian (96 W), true north points east of grid north
-    assert 2 < cb.grid_convergence_deg(-118.57, 34.55, "EPSG:5070") < 15
-    assert abs(cb.grid_convergence_deg(-96.0, 34.55, "EPSG:5070")) < 0.01
+    assert 2 < kit.grid_convergence_deg(-118.57, 34.55, "EPSG:5070") < 15
+    assert abs(kit.grid_convergence_deg(-96.0, 34.55, "EPSG:5070")) < 0.01
 
 
 def test_ignition_comes_from_the_case_is_reprojected_and_timed_from_t0(tmp_path):
@@ -81,7 +83,7 @@ def test_ignition_comes_from_the_case_is_reprojected_and_timed_from_t0(tmp_path)
 
 
 def test_chain_elmfire_spreads_downwind_and_is_scored(tmp_path, landscape):
-    eb = pytest.importorskip("elmfire_block")
+    eb = pytest.importorskip("elmfire")
     roads = tmp_path / "roads"
     run_block("roads_override", roads, params={"replacement_fuel": "GR2"}, inputs={"in": str(landscape)})
     run_block("case_ignition", tmp_path / "ign_raw", params={"which": "reported"})
@@ -132,12 +134,12 @@ def test_chain_elmfire_spreads_downwind_and_is_scored(tmp_path, landscape):
 
 
 def test_a_fire_without_what_a_block_needs_is_unavailable_not_an_error(tmp_path):
-    with pytest.raises(cb.Unavailable, match="no 'ngfs' ignition"):
-        cb.execute({"block": "case_ignition", "case": CASE, "params": {"which": "ngfs"},
+    with pytest.raises(kit.Unavailable, match="no 'ngfs' ignition"):
+        runner.execute({"block": "case_ignition", "case": CASE, "params": {"which": "ngfs"},
                     "out_dir": str(tmp_path / "ngfs")}, lambda *_: None)
     assert "unavailable" in json.loads((tmp_path / "ngfs" / "provenance.json").read_text())
-    with pytest.raises(cb.Unavailable, match="no reference"):
-        cb.execute({"block": "final_perimeter", "case": CASE, "params": {}, "inputs": {},
+    with pytest.raises(kit.Unavailable, match="no reference"):
+        runner.execute({"block": "final_perimeter", "case": CASE, "params": {}, "inputs": {},
                     "out_dir": str(tmp_path / "ref")}, lambda *_: None)
 
 
@@ -149,20 +151,20 @@ def test_scores_are_taken_at_the_reference_observation_time(tmp_path):
     toa = np.full(shape, np.nan, "float32")
     toa[0:10, 0:10] = 30                                   # burned by minute 30
     toa[10:20, 0:10] = 90                                  # burned at minute 90, after the observation
-    cb.write_tif(pred / "time_of_arrival.tif", toa, transform, CASE["crs"])
+    kit.write_tif(pred / "time_of_arrival.tif", toa, transform, CASE["crs"])
     (pred / "summary.json").write_text(json.dumps({"stop_time_min": 180}))
     burned = np.zeros(shape, "uint8")
     burned[0:10, 0:10] = 1
-    cb.write_tif(ref / "burned.tif", burned, transform, CASE["crs"])
+    kit.write_tif(ref / "burned.tif", burned, transform, CASE["crs"])
     inputs = {"prediction": str(pred), "reference": str(ref)}
 
     def score(observed, stop=180):
         (pred / "summary.json").write_text(json.dumps({"stop_time_min": stop}))
         case = {**CASE, "reference": {"observed_utc": observed}} if observed else CASE
-        return cb.iou({"case": case, "inputs": inputs, "out_dir": str(tmp_path / "s")}, None)
+        return __import__("iou").run({"case": case, "inputs": inputs, "out_dir": str(tmp_path / "s")}, None)
 
     assert score("2025-01-22T19:53:00Z") == {"iou": 1.0, "intersection_cells": 100, "union_cells": 100,
                                              "scored_at_min": 60.0}
     assert score(None)["iou"] == 0.5                       # no observation time: everything burned
-    with pytest.raises(cb.Unavailable, match="longer duration_min"):
+    with pytest.raises(kit.Unavailable, match="longer duration_min"):
         score("2025-01-22T23:53:00Z")                      # observed at 300 min, the run stopped at 180

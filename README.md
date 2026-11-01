@@ -20,7 +20,7 @@ and what a fire can't provide.
 
 | Part | Where | What it is |
 |---|---|---|
-| **Blocks** | `blocks/*.yaml` | One manifest per model, data source, transform, reference or metric: what it consumes and produces, its parameters (types, defaults, ranges, rationale), and where its code and image are. Adding a model is adding a block. ([blocks/README.md](blocks/README.md)) |
+| **Blocks** | `blocks/<kind>/` | One per model, data source, transform, reference or metric: a manifest (`<name>.yaml`: what it consumes and produces, its parameters with types, defaults, ranges and rationale, its image) and its code next to it (`<name>.py`). Adding a model is adding a block. ([blocks/README.md](blocks/README.md)) |
 | **Workflows** | `workflows/*.yaml` | A recipe: one source per input slot (plus transforms), one model with fixed parameters, a reference block, metrics, the grid resolution. No fire in it. Another version of a recipe is another workflow. |
 | **Cases** | `cases/*.yaml` | A fire's facts: t0, weather window, CRS, domain (or derived from the reference perimeter), its ignition points, its reference perimeter (a file or a hosted URL). ([cases/README.md](cases/README.md)) |
 | **Conventions** | `docs/conventions.md` | One answer to every question models disagree on (orientation, wind direction, units, time, grid). Sources convert into them, model adapters convert out of them, and every artifact is checked against them before it is accepted. |
@@ -61,15 +61,21 @@ reason, instead of failing.
 ## Repository
 
 ```
-blocks/              block manifests (+ README: the manifest fields)
+blocks/              one folder per kind; each block is <name>.yaml (manifest) + <name>.py (code)
+  sources/           landfire, station_wind, fixed_moisture, case_ignition
+  transforms/        roads_override, reproject (inserted by the resolver; no manifest), windninja*
+  models/            elmfire (the pyretechnics adapter), farsite*, wrf_fire*
+  reference/         final_perimeter
+  metrics/           iou, area_bias, scoring.py (what they share)
+  lib/               shared by every block: blockkit (unavailable, t0, rasters), http_session
+                     (retries), run_block (the step runner)
+                     (* manifest only, not implemented)
 workflows/           recipes: elmfire_reported_ignition, elmfire_ngfs_ignition
 cases/               fires (+ README: the case fields); hughes.yaml, sandia.yaml
 references/          observed perimeters the cases point at (GeoJSON), until they are hosted
-images/core/         the Python-only blocks: LANDFIRE, roads override, station wind,
-                     moisture, the case's ignition points, reproject, reference, IoU, area bias
-images/elmfire/      the ELMFIRE adapter (pyretechnics)
-images/wstc/         one image recipe per block family (core, elmfire), FROM the
-                     server's Dagster version; pushed to Docker Hub
+images/wstc/         one image recipe per family, FROM the server's Dagster version, pushed
+                     to Docker Hub: core (rasterio, for every block but the model) and
+                     elmfire (pyretechnics in its own Python 3.12)
 src/bench/
   registry.py        loads blocks/
   workflows.py       loads and checks workflows and cases; a fire's domain
@@ -104,8 +110,8 @@ tests/               test_framework.py (resolver, identity, compile), test_block
 
 | You want to add | You do |
 |---|---|
-| a model | a manifest with `execution` (code + image family), an adapter that follows the model contract (docs/block_contract.md), an image recipe in `images/wstc/<family>/` |
-| a data source, transform or metric | a manifest, and a function in `images/core/core_blocks.py` (or its own image if it needs other packages) |
+| a model | `blocks/models/<name>.yaml` with `execution: {image: <family>}`, `<name>.py` (an adapter that follows the model contract, docs/block_contract.md), an image recipe in `images/wstc/<family>/` |
+| a data source, transform or metric | `blocks/<kind>/<name>.yaml` and `<name>.py` with a `run(step, log)` function (in the core image, or its own if it needs other packages) |
 | a fire | a case file in `cases/` (and its reference perimeter) |
 | another version of a recipe (a parameter value, a different source) | another workflow file |
 

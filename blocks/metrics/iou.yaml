@@ -1,0 +1,8 @@
+name: iou
+kind: metric
+description: Intersection over union of predicted and observed burned area (1 = perfect).
+needs:                            # a prediction and the reference, both as burned area
+- perimeter
+- perimeter
+execution:
+  image: core

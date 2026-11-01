@@ -13,5 +13,4 @@ params:
     type: str
     default: GR2                  # Scott & Burgan name; the block maps it to the FBFM40 code (102)
 execution:
-  code: images/core/core_blocks.py
   image: core
