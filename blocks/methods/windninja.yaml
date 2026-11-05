@@ -1,5 +1,5 @@
 name: windninja
-kind: transform
+kind: method
 description: >
   WindNinja mass-conserving wind downscaling: station wind + terrain -> gridded
   wind. Not implemented yet.

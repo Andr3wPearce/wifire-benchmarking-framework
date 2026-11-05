@@ -62,17 +62,17 @@ def mermaid(cp: dict) -> Markdown:
         return ids[key]
 
     for a in cp["assets"]:
-        node(tuple(a["key"]), f"{a['slot']}<br/>{a['block']}")
+        node(tuple(a["key"]), f"<b>{a['slot']}</b><br/>{a['block']}")
         if a["after"]:
             lines.append(f"  {ids[tuple(a['after'])]} --> {ids[tuple(a['key'])]}")
     tails = [tuple(a["key"]) for a in cp["assets"] if not any(a["key"] == b["after"] for b in cp["assets"])]
-    pred = node("prediction", f"prediction<br/>{cp['model']['block']}")
+    pred = node("prediction", f"<b>prediction</b><br/>{cp['model']['block']}")
     for t in tails:
         lines.append(f"  {ids[t]} --> {pred}")
-    ref = node("reference", "reference<br/>observed perimeter")
-    rep = node("report", "report<br/>one row per fire")
+    ref = node("reference", "<b>reference</b><br/>observed perimeter")
+    rep = node("report", "<b>report</b><br/>one row per fire")
     for m in cp["metrics"]:
-        s = node(f"score/{m}", f"score<br/>{m}")
+        s = node(f"score/{m}", f"<b>score</b><br/>{m}")
         lines += [f"  {pred} --> {s}", f"  {ref} --> {s}", f"  {s} --> {rep}"]
     lines.append("  classDef step fill:#fde3c8,stroke:#c2410c,color:#111")
     src = "\n".join(lines)
@@ -137,3 +137,33 @@ def show_previews(previews: dict[str, str], width: int = 520) -> None:
                          f'<figcaption style="font-size:12px">{html.escape(label)}</figcaption></figure>')
     display(HTML('<div style="display:flex;flex-wrap:wrap">' + "".join(cells) + "</div>"
                  if cells else "<i>no previews yet</i>"))
+
+def scoring_matrix(reports: dict, metric: str, fires: list) -> Markdown:
+    """{modeling workflow: its report rows} -> one row per modeling workflow, one column per
+    fire, the metric's value in each cell (or why there is none: unavailable, not scored)."""
+    out = []
+    for wf, rows in reports.items():
+        by_fire = {r["fire"]: r for r in rows}
+        row = {"modeling workflow": wf}
+        for f in fires:
+            r = by_fire.get(f, {"status": "not run"})
+            row[f] = r.get(metric) if r.get("status") == "done" and r.get(metric) is not None else r.get("status")
+        out.append(row)
+    return md_table(out, ["modeling workflow", *fires])
+
+
+def download_links(results_by_fire: dict) -> Markdown:
+    """{fire: d.results(run_id)} -> where each prediction's rasters are in S3.
+
+    Shows the S3 location, not the presigned download links in the metadata: those carry
+    the bucket's access key ID and expire after a day, so they don't belong in a saved
+    notebook. (Dagster's UI still has them.)"""
+    rows = []
+    for fire, res in sorted(results_by_fire.items()):
+        for asset, md in res.items():
+            if asset.endswith("/prediction"):
+                files = [k[len("download "):] for k in md if k.startswith("download ")]
+                rows.append({"fire": fire, "s3": md.get("s3_status", "(not recorded)"),
+                             "location": f"`{md['s3']}`" if str(md.get("s3", "")).startswith("s3://") else "",
+                             "files": ", ".join(files)})
+    return md_table(rows)

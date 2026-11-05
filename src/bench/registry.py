@@ -15,7 +15,7 @@ BLOCKS_DIR = ROOT / "blocks"
 
 
 # blocks/<folder>/ for each kind; blocks/lib/ is shared code, not blocks
-KIND_DIRS = {"source": "sources", "transform": "transforms", "model": "models",
+KIND_DIRS = {"source": "sources", "method": "methods", "model": "models",
              "reference": "reference", "metric": "metrics"}
 
 

@@ -12,7 +12,7 @@ grid:
 inputs:
   landscape:
     source: {block: landfire, version: "2024", layers: [fbfm40, cc, ch, cbh, cbd, elevation]}
-    transforms:                     # applied in order to the source's output
+    methods:                        # applied in order to the source's output
       - {block: roads_override}
   weather:
     source: {block: station_wind}

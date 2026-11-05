@@ -49,7 +49,7 @@ def read_tif(path: Path) -> np.ndarray:
 
 
 def copy_tree(src: Path, dst: Path, skip=("provenance.json",)) -> None:
-    """Copy an upstream artifact's files (not its provenance) as the start of a transform."""
+    """Copy an upstream artifact's files (not its provenance) as the start of a method."""
     dst.mkdir(parents=True, exist_ok=True)
     for f in Path(src).iterdir():
         if f.is_file() and f.name not in skip:

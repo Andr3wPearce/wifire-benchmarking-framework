@@ -1,5 +1,5 @@
 name: roads_override
-kind: transform
+kind: method
 description: >
   Roads, urban and other non-burnable codes that are not water or snow
   (FBFM40 91, 93, 99) set to a burnable fuel model, so every model treats them

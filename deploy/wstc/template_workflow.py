@@ -12,7 +12,8 @@
 # How a step runs: its pod starts from its block's image (IMAGES), writes the blocks' code
 # (CODE) to /tmp, runs the block, checks what it wrote against the conventions, and only then
 # moves the artifact into place under its identity on the shared volume. A step whose identity
-# already holds a finished artifact reuses it. A fire that lacks what a block needs (no NGFS
+# already holds a finished artifact reuses it. Every finished artifact is also copied to S3 under
+# the same identity path (write-through, blocks/lib/s3_store.py); a failed copy only warns. A fire that lacks what a block needs (no NGFS
 # detection, no station in range) gets an "unavailable" artifact with the reason, and every
 # step after it for that fire says so too, instead of failing.
 #
@@ -35,14 +36,20 @@ IMAGES = __IMAGES__              # {image family: image reference}
 PLAN = json.loads(__PLAN__)      # bench.wstc.compile_plan(...)
 CODE = __CODE__                  # {file name: source}: the blocks used, blocks/lib, conventions, previews
 
-# TEMP(shared-volume): the artifact store. Kai: not backed up, 10 GiB shared by everyone;
-# finished artifacts move to the S3 bucket (wstc-dagster) next, under the same identity paths.
+# TEMP(shared-volume): the artifact store steps read and reuse from: not backed up, 10 GiB shared
+# by everyone. Finished artifacts are also written through to S3 (S3_PREFIX + the same identity
+# path); reads and reuse move to S3 next.
 ART = Path(f"/opt/dagster/shared/storage/{ME}/bench/artifacts")
+S3_PREFIX = f"{ME}/bench/artifacts"
 CODE_DIR = Path("/tmp/bench/code")
 GROUP = f"{ME}_{WF}"
 FIRES = dg.StaticPartitionsDefinition(sorted(PLAN["fires"]))
 TAG_EMAIL = "bench/lfps_email"   # run tag carrying the email LANDFIRE's service requires
 UNAVAILABLE_EXIT = 3             # a block's exit code for "this fire doesn't have what I need"
+# the badges each asset shows in Dagster's lineage graph: its block's kind (`auto` steps, which the
+# resolver inserts, are methods too) and the image family its pod runs in (core, elmfire).
+# Filter the graph with e.g. `kind:method` or `kind:elmfire`.
+KIND_BADGE = {"auto": "method"}
 
 
 def _pod(image_family: str, resources: dict) -> dict:
@@ -118,16 +125,34 @@ def _done(path: str) -> dict | None:
     return json.loads(marker.read_text()) if marker.exists() else None
 
 
-def _materialize(context, path: str, case: dict, build) -> tuple[dict, bool]:
+def _s3_copy(context, path: str, presign=()) -> dict:
+    """Write-through: copy the finished artifact at `path` to S3 under the same identity path,
+    with 24-hour download links for the `presign` files (blocks/lib/s3_store.py, run with the
+    image's block Python, which has boto3). Never fails the step: returns what happened."""
+    result = Path("/tmp/bench") / f"s3-{context.run_id[:8]}-{path.replace('/', '_')}.json"
+    try:
+        _run(context, "s3_store.py", ART / path, f"{S3_PREFIX}/{path}", result, *presign)
+        out = json.loads(result.read_text())
+    except Exception as e:                     # the artifact is still on the volume
+        out = {"status": f"failed: {e}"}
+    finally:
+        result.unlink(missing_ok=True)
+    if out.get("status") not in ("uploaded", "already in S3"):
+        context.log.warning(f"S3 copy of {path}: {out.get('status')}")
+    return out
+
+
+def _materialize(context, path: str, case: dict, build, presign=()) -> tuple[dict, bool]:
     """Build the artifact at its identity path unless it is already there.
 
     Returns (done marker, reused). `build(tmp)` writes into a temporary sibling; the result is
     checked and then renamed into place, so a reader never sees half an artifact and a failed
     step leaves nothing behind that looks finished. A build that raises _Unavailable leaves a
-    marker saying why, which downstream steps read."""
+    marker saying why, which downstream steps read. Either way the artifact is then copied to
+    S3 (if it isn't there yet), and what happened is returned as done["s3"]."""
     if done := _done(path):
         context.log.info(f"reused {path} (built {done.get('finished_utc')} by run {done.get('run_id', '?')[:8]})")
-        return done, True
+        return {**done, "s3": _s3_copy(context, path, presign)}, True
     final = ART / path
     tmp = ART / f"{path}.tmp-{context.run_id[:8]}"
     shutil.rmtree(tmp, ignore_errors=True)
@@ -148,7 +173,7 @@ def _materialize(context, path: str, case: dict, build) -> tuple[dict, bool]:
     if final.exists():                      # an unfinished leftover (no _done.json): replace it
         shutil.rmtree(final)
     os.replace(tmp, final)
-    return done, False
+    return {**done, "s3": _s3_copy(context, path, presign)}, False
 
 
 def _upstream_unavailable(paths: dict) -> str | None:
@@ -190,6 +215,12 @@ def _provenance(done: dict, reused: bool, path: str, identity: str) -> dict:
           "built_by_run": done.get("run_id", "")[:8], "build_s": done.get("seconds")}
     if done.get("unavailable"):
         md["unavailable"] = done["unavailable"]
+    s3 = done.get("s3") or {}
+    if s3:
+        md["s3"] = s3.get("uri") or s3.get("status")
+        md["s3_status"] = s3.get("status")
+        for rel, url in (s3.get("links") or {}).items():
+            md[f"download {Path(rel).name}"] = dg.MetadataValue.url(url)
     return md
 
 
@@ -205,6 +236,7 @@ def _input_asset(asset: dict):
               deps=[dg.AssetKey(asset["after"])] if asset["after"] else [],
               description=f"{asset['block']} ({asset['kind']}): {asset['name']}"
                           + (f". Inserted because {asset['reason']}" if asset.get("reason") else ""),
+              kinds={KIND_BADGE.get(asset["kind"], asset["kind"]), asset["image"]},
               op_tags=_pod(asset["image"], asset["resources"]))
     def _a(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         fire = _fire(context)
@@ -226,7 +258,7 @@ REF = PLAN["reference"]
 
 @dg.asset(key=dg.AssetKey(REF["key"]), group_name=GROUP, partitions_def=FIRES,
           description="The fire's observed perimeter, rasterized onto its grid.",
-          op_tags=_pod(REF["image"], REF["resources"]))
+          kinds={"reference", REF["image"]}, op_tags=_pod(REF["image"], REF["resources"]))
 def reference(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     fire = _fire(context)
     ref = fire["reference"]
@@ -265,7 +297,7 @@ def _preview_md(pred_dir: Path) -> str | None:
 
 @dg.asset(key=PRED_KEY, group_name=GROUP, partitions_def=FIRES, deps=[dg.AssetKey(k) for k in TAILS],
           description=f"{MODEL['block']} on this fire, params {json.dumps(MODEL['params'])}.",
-          op_tags=_pod(MODEL["image"], MODEL["resources"]))
+          kinds={"model", MODEL["image"]}, op_tags=_pod(MODEL["image"], MODEL["resources"]))
 def prediction(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     fire = _fire(context)
     run = fire["run"]
@@ -286,7 +318,8 @@ def prediction(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
             context.log.warning(f"preview failed (the prediction is kept): {e.metadata}")
         return json.loads((pred / "summary.json").read_text())
 
-    done, reused = _materialize(context, run["path"], run["run_json"]["case"], build)
+    done, reused = _materialize(context, run["path"], run["run_json"]["case"], build,
+                                presign=("prediction/time_of_arrival.tif", "prediction/preview.png"))
     md = _provenance(done, reused, run["path"], run["identity"])
     if preview := _preview_md(ART / run["path"] / "prediction"):
         md["preview"] = dg.MetadataValue.md(preview)
@@ -300,7 +333,7 @@ def _score_asset(metric: str):
     @dg.asset(key=dg.AssetKey([ME, WF, "score", metric]), group_name=GROUP, partitions_def=FIRES,
               deps=[PRED_KEY, dg.AssetKey(REF["key"])],
               description=f"{metric}: the prediction vs the observed perimeter.",
-              op_tags=_pod(spec["image"], spec["resources"]))
+              kinds={"metric", spec["image"]}, op_tags=_pod(spec["image"], spec["resources"]))
     def _s(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         fire = _fire(context)
         needs = {"prediction": fire["run"]["path"], "reference": fire["reference"]["path"]}
@@ -333,7 +366,8 @@ def _table_csv(rows: list[dict], cols: list[str]) -> str:
 
 @dg.asset(key=dg.AssetKey([ME, WF, "report"]), group_name=GROUP,
           deps=[dg.AssetKey([ME, WF, "score", m]) for m in PLAN["metrics"]],
-          description="The workflow's table: one row per fire (reads the artifact store).")
+          description="The workflow's table: one row per fire (reads the artifact store).",
+          kinds={"report", "s3"})
 def report(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     rows = []
     for name in sorted(PLAN["fires"]):
@@ -342,13 +376,15 @@ def report(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         row = {"fire": name, "status": "not run"}
         if pred:
             row["status"] = f"unavailable: {pred['unavailable']}" if pred.get("unavailable") else "done"
-            row["predicted_ha"] = pred.get("summary", {}).get("burned_area_ha")
+            # burned by the end of the run; `predicted_ha` (below, from area_bias) is at the
+            # observation time, which is what the scores compare
+            row["burned_ha_end_of_run"] = pred.get("summary", {}).get("burned_area_ha")
         for m in PLAN["metrics"]:
             s = _done(fire["scores"][m])
             if s and s.get("unavailable") and row["status"] == "done":
                 row["status"] = f"not scored: {s['unavailable']}"
             elif s:
-                row.update({k: v for k, v in s.get("summary", {}).items() if k in (m, "observed_ha", "scored_at_min")})
+                row.update({k: v for k, v in s.get("summary", {}).items() if k in (m, "predicted_ha", "observed_ha", "scored_at_min")})
         rows.append(row)
     cols = list(dict.fromkeys(c for r in rows for c in r))
     table = "| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n" + "\n".join(

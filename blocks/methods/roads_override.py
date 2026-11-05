@@ -1,4 +1,4 @@
-"""roads_override: roads and urban cells -> a burnable fuel model (landscape transform).
+"""roads_override: roads and urban cells -> a burnable fuel model (landscape method).
 
 LANDFIRE maps roads and developed land as non-burnable (NB1, NB3, NB9), which stops fire
 at every road. This replaces them with `params.replacement_fuel` (e.g. GR2); water (NB8)

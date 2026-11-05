@@ -4,7 +4,7 @@ What an implemented block (one with `execution:` in its manifest) gets from the
 framework, and what it must give back. There are two shapes: **models** (a run
 directory) and everything else (**steps**). A block's code is `<name>.py` next to its
 manifest (`blocks/<kind>/`); ELMFIRE (`blocks/models/elmfire.py`) and the sources,
-transforms, reference and metrics in `blocks/` are the reference implementations.
+methods, reference and metrics in `blocks/` are the reference implementations.
 
 ## How a block is run
 
@@ -14,7 +14,7 @@ blocks' code (shipped inside the compiled workflow file) to `/tmp/bench/code`
 and runs the block's file (`execution.code`) with the image's block Python
 (`$BENCH_PYTHON` if the image sets it, else the Python Dagster runs in):
 
-    python run_block.py <step.json>          # sources, transforms, reference, metrics
+    python run_block.py <step.json>          # sources, methods, reference, metrics
     python elmfire.py <run_dir>              # models
 
 `run_block.py` (blocks/lib) imports the step's block (`<block>.py`) and calls its
@@ -28,7 +28,7 @@ temporary directory; the framework then checks every raster against
 under its identity. A block that fails, or writes something that breaks the
 conventions, leaves nothing behind that looks finished.
 
-## Step contract (sources, transforms, reference, metrics)
+## Step contract (sources, methods, reference, metrics)
 
 One `step.json`:
 
@@ -46,7 +46,7 @@ One `step.json`:
 * `params` are already merged with the manifest's defaults and type-checked.
 * `selection` is the workflow's data selection for a source (everything on its
   line except `block`, `params`, `version`).
-* `inputs`: `in` for a transform or an automatic step; `file` for the reference;
+* `inputs`: `in` for a method or an automatic step; `file` for the reference;
   `prediction` and `reference` for a metric.
 * `case` is the fire's facts (cases/<fire>.yaml) plus the workflow's grid
   resolution: the case grid, t0, its ignition points, its reference.
@@ -75,7 +75,7 @@ A run directory containing `run.json`:
 ```
 
 `inputs` are each slot's final artifact (after automatic steps and the
-workflow's transforms), relative to `BENCH_ARTIFACT_ROOT`. The model writes a
+workflow's methods), relative to `BENCH_ARTIFACT_ROOT`. The model writes a
 Prediction to `run_dir/prediction/`.
 
 ## Canonical inputs (one directory per slot)

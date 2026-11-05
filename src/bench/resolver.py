@@ -19,7 +19,7 @@ from __future__ import annotations
 from .registry import BLOCKS
 
 PY_TYPES = {"float": (int, float), "int": (int,), "bool": (bool,), "str": (str,)}
-# steps the resolver inserts itself; their code is in blocks/<kind>/ with no manifest (blocks/transforms/reproject.py)
+# steps the resolver inserts itself; their code is in blocks/<kind>/ with no manifest (blocks/methods/reproject.py)
 AUTO_BLOCKS = {"reproject"}
 
 
@@ -85,11 +85,11 @@ def resolve(workflow: dict, case: dict) -> dict:
                           "params": {"to": case["crs"]},
                           "reason": f"native CRS {native['crs']} differs from case CRS {case['crs']}"})
         produced = set(b["produces"])
-        for t in cfg.get("transforms", []):
-            tb = _require(t["block"], "transform", f"inputs.{slot}")
+        for t in cfg.get("methods", []):
+            tb = _require(t["block"], "method", f"inputs.{slot}")
             tp, w = params(t["block"], t.get("params"))
             warnings += w
-            steps.append({"step": f"{slot}.{t['block']}", "kind": "transform", "block": t["block"],
+            steps.append({"step": f"{slot}.{t['block']}", "kind": "method", "block": t["block"],
                           "params": tp, "needs_from_slots": tb.get("needs_from_slots", {})})
             produced |= set(tb["produces"])
         available |= produced

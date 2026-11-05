@@ -1,4 +1,4 @@
-"""Runs one step block (a source, transform, reference or metric) on its step.json:
+"""Runs one step block (a source, method, reference or metric) on its step.json:
 
     python run_block.py <step.json>
 

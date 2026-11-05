@@ -117,12 +117,14 @@ def k8s_resources(block: str) -> dict:
 # --------------------------------------------------------------------------- #
 BLOCKS_DIR = ROOT / "blocks"
 # steps the resolver inserts itself: code next to the other blocks of their kind, no manifest
-AUTO_STEP_CODE = {"reproject": BLOCKS_DIR / "transforms" / "reproject.py"}
+AUTO_STEP_CODE = {"reproject": BLOCKS_DIR / "methods" / "reproject.py"}
 # the step runner for every non-model block (python run_block.py <step.json>)
 RUNNER = BLOCKS_DIR / "lib" / "run_block.py"
+# the write-through copy of finished artifacts to S3, run by the template after every step
+S3_STORE = BLOCKS_DIR / "lib" / "s3_store.py"
 # shared modules that don't shape any artifact's content, so changing them rebuilds nothing:
 # the HTTP session (retries) and the runner (provenance)
-NOT_IN_IDENTITY = {"http_session", "run_block"}
+NOT_IN_IDENTITY = {"http_session", "run_block", "s3_store"}
 
 
 def block_code(block: str) -> Path:
@@ -176,7 +178,9 @@ def block_code_hash(block: str) -> str:
     the wind block therefore doesn't re-download LANDFIRE, and adding retries to the
     HTTP session rebuilds nothing."""
     files = [f for f in code_closure(block_code(block)) if f.stem not in NOT_IN_IDENTITY]
-    return _h([[str(f.relative_to(ROOT)), f.read_text()] for f in files])
+    # by file name and content, not path: moving a block between folders changes nothing it builds
+    # (file names are unique across blocks/, which the compiler enforces)
+    return _h([[f.name, f.read_text()] for f in files])
 
 
 def _case_for(slot: str, case: dict) -> dict:
@@ -287,7 +291,7 @@ def build_workflow_file(workflow_path: Path, cases: list[str] | None, me: str, o
         raise ValueError(f"no image given for families {missing}")
     used = {a["block"] for a in cp["assets"]} | {cp["model"]["block"], cp["reference"]["block"]} | set(cp["metrics"])
     code_files = {f for b in used for f in code_closure(block_code(b))}
-    code_files |= set(code_closure(RUNNER)) | set(FRAMEWORK_CODE)
+    code_files |= set(code_closure(RUNNER)) | {S3_STORE} | set(FRAMEWORK_CODE)
     names = [f.name for f in code_files]
     clash = sorted({n for n in names if names.count(n) > 1})
     if clash:   # every file lands in one directory in the step's pod

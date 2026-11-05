@@ -1,7 +1,7 @@
 """Loading workflows (recipes) and cases (fires).
 
 A **workflow** is a recipe, with no fire in it: one source per input slot (plus
-transforms), one model with fixed parameters, a reference block and metrics, and
+methods), one model with fixed parameters, a reference block and metrics, and
 the grid resolution. Testing a different version of a recipe means writing a
 different workflow. Its name is its file name, so a copy never clashes.
 
@@ -35,6 +35,9 @@ def load_workflow(path: Path) -> dict:
         raise ValueError(f"{path.name} is missing section(s) {missing}; a workflow needs "
                          f"{WORKFLOW_SECTIONS} (see workflows/elmfire_reported_ignition.yaml)")
     for slot, cfg in wf["inputs"].items():
+        if "transforms" in cfg:
+            raise ValueError(f"{path.name}: slot {slot!r} uses `transforms:`; they are called `methods:` now "
+                             "(blocks/methods/)")
         if "sources" in cfg:
             raise ValueError(f"{path.name}: slot {slot!r} has several sources. A workflow is one recipe: "
                              "use one `source`, and make another workflow for the other one")
