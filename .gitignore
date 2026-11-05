@@ -8,3 +8,15 @@ deploy/wstc/build/
 # left over from the removed local (minikube) path
 artifacts/
 .dagster_home/
+
+# created by Anaconda JupyterLab extension
+anaconda_projects/
+
+# submissions are data from others (put in S3, never committed); only the README is tracked.
+submissions/*/
+
+# personal settings for the notebook (e.g. BENCH_LFPS_EMAIL); never committed
+.bench.local
+
+# local material that is not ours to publish (e.g. a replay of a non-public model)
+private/
