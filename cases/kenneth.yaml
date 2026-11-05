@@ -1,0 +1,23 @@
+# The Kenneth Fire, Jan 9 2025: West Hills / Calabasas, on the Los Angeles / Ventura county line.
+# Built from the WIFIRE Consolidated Fire Groupings 2025 geopackage,
+# fire_group 8_CA-VNC-KENNETH-20240109-1428_None.
+#
+# A case is one fire's facts; workflows (recipes) run on it. See cases/README.md.
+incident: KENNETH
+t0: "2025-01-09T22:39:23Z"          # simulation clock zero (UTC): the earliest of the fire's three IRWIN
+                                     # records (2025-CALAC-012267; also 2025-CAVNC-003155, 2025-CALFD-000003)
+window_h: 24
+# no domain_wgs84: the domain is the reference perimeter's bounding box + domain_buffer_km (5 km)
+
+ignitions:
+  reported:                          # the geopackage Centers layer (fire_start)
+    {lat: 34.184187, lon: -118.670197, time_utc: "2025-01-09T22:47:00Z",
+     source: "WIFIRE Consolidated Fire Groupings 2025, Centers (fire_start)"}
+  ngfs:                              # first NGFS (GOES) detection; NGFS times are Pacific, converted to UTC
+    {lat: 34.185697, lon: -118.670986, time_utc: "2025-01-09T22:46:00Z",
+     source: "WIFIRE Consolidated Fire Groupings 2025, NGFS (first detection 14:46 PST)"}
+
+reference:
+  file: references/kenneth_perimeter.geojson
+  observed_utc: "2025-01-10T01:24:12Z"   # the latest FIRIS mapping (mission 01:13Z): 960 acres, 165 min after t0
+  source: "FIRIS perimeter (geopackage Perimeters id 14511)"

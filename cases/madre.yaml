@@ -1,0 +1,23 @@
+# The Madre Fire, Jul 2 2025: San Luis Obispo County (Los Padres NF), along Hwy 166.
+# Built from the WIFIRE Consolidated Fire Groupings 2025 geopackage,
+# fire_group 63_CA-SLU-GILARDI-20250702-1312_MADRE-N57B.
+#
+# A case is one fire's facts; workflows (recipes) run on it. See cases/README.md.
+incident: MADRE
+t0: "2025-07-02T20:07:32Z"          # simulation clock zero (UTC): IRWIN discovery (2025-CALPF-001817)
+window_h: 24
+# no domain_wgs84: the domain is the reference perimeter's bounding box + domain_buffer_km (5 km)
+
+ignitions:
+  reported:                          # the geopackage Centers layer (fire_start)
+    {lat: 35.094912, lon: -120.03572, time_utc: "2025-07-02T20:12:00Z",
+     source: "WIFIRE Consolidated Fire Groupings 2025, Centers (fire_start)"}
+  ngfs:                              # first NGFS (GOES) detection; NGFS times are Pacific, converted to UTC.
+                                     # 1.5 min before the IRWIN discovery: the model starts it at t0
+    {lat: 35.094444, lon: -120.036667, time_utc: "2025-07-02T20:06:00Z",
+     source: "WIFIRE Consolidated Fire Groupings 2025, NGFS (first detection 13:06 PDT)"}
+
+reference:
+  file: references/madre_perimeter.geojson
+  observed_utc: "2025-07-02T22:48:21Z"   # the later of the two perimeters: 8,396 acres, 161 min after t0
+  source: "FIRIS perimeter (geopackage Perimeters id 14727)"
