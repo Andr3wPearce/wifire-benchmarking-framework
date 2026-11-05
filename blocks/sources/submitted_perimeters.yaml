@@ -1,0 +1,18 @@
+name: submitted_perimeters
+kind: source
+slot: submission
+description: >
+  A submitted prediction, read from S3: timed fire perimeters for one fire, from a
+  model we don't run and know nothing about (a black box). Reads
+  <prefix>/<case name>.geojson from the artifact bucket, checks it, and records its URI
+  and sha256. Unavailable for a fire with no submission. Submissions are immutable: a
+  new version gets a new prefix (e.g. .../v2), which is part of this step's identity.
+produces:
+- perimeter_series
+params:
+  prefix:
+    type: str
+    default: ""
+    rationale: "S3 key prefix of the submission, e.g. apearce/bench/submissions/<name>/v1"
+execution:
+  image: core

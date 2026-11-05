@@ -39,7 +39,7 @@ def plan(w=None, c=None):
 def test_manifests_load_and_implemented_blocks_point_at_real_code():
     assert {"landfire", "elmfire", "case_ignition", "farsite", "iou"} <= set(BLOCKS)
     for name, m in BLOCKS.items():
-        assert m["kind"] in {"source", "transform", "model", "reference", "metric"}, name
+        assert m["kind"] in {"source", "method", "model", "reference", "metric"}, name
         if "execution" in m:
             assert (ROOT / m["execution"]["code"]).is_file(), name
             assert (ROOT / "images" / "wstc" / m["execution"]["image"] / "Dockerfile").is_file(), name
@@ -95,7 +95,7 @@ def test_recipes_that_cant_run_are_rejected_with_the_reason():
         plan(workflow(model={"block": "wrf_fire"}))
     w = workflow()
     w["inputs"] = {**w["inputs"], "weather": {"source": {"block": "station_wind"},
-                                              "transforms": [{"block": "windninja"}]}}
+                                              "methods": [{"block": "windninja"}]}}
     with pytest.raises(ValueError, match="windninja"):
         plan(w)
 
@@ -171,7 +171,7 @@ def test_compiled_file_partitions_by_fire_and_gives_each_step_its_blocks_image(t
     assert set(mod.CODE) == {"landfire.py", "roads_override.py", "station_wind.py", "fixed_moisture.py",
                              "case_ignition.py", "reproject.py", "elmfire.py", "final_perimeter.py",
                              "iou.py", "area_bias.py", "scoring.py", "blockkit.py", "http_session.py",
-                             "run_block.py", "conventions.py", "previews.py"}
+                             "run_block.py", "s3_store.py", "conventions.py", "previews.py"}
 
 
 # ---------------------------------------------------------------- conventions
@@ -197,3 +197,29 @@ def test_conventions_catch_south_up_percent_cover_and_off_grid(tmp_path):
     assert any("wrong units" in p for p in check_raster(write("canopy_cover", np.full(shape, 40.0, "float32"), grid), case))
     shifted = Affine(grid.a, 0, grid.c + 30, 0, grid.e, grid.f)
     assert any("case grid" in p for p in check_raster(write("elevation", np.zeros(shape, "float32"), shifted), case))
+
+
+def test_a_submitted_prediction_is_a_workflow_like_any_other(tmp_path):
+    """A model we don't run: its perimeters come in through a source (submitted_perimeters),
+    a replay "model" turns them into a prediction, and benchmarking is unchanged."""
+    from bench import submit
+    wf_path = tmp_path / "replay_example.yaml"
+    wf_path.write_text("""
+grid: {resolution_m: 30}
+inputs:
+  submission:
+    source: {block: submitted_perimeters, params: {prefix: test/bench/submissions/example/v1}}
+model: {block: perimeter_replay}
+reference: {block: final_perimeter}
+metrics: [{block: iou}, {block: area_bias}]
+""")
+    cp = wstc.compile_plan(load_workflow(wf_path), load_cases(), "test")
+    assert [a["name"] for a in cp["assets"]] == ["submission.submitted_perimeters"]
+    assert cp["model"]["block"] == "perimeter_replay" and set(cp["metrics"]) == {"iou", "area_bias"}
+    sub = tmp_path / "submissions" / "example" / "v1"
+    sub.mkdir(parents=True)
+    (sub / "hughes.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"time_utc": "2025-01-22T19:10:00Z"},
+         "geometry": {"type": "Polygon", "coordinates": [[[-118.56, 34.57], [-118.55, 34.57], [-118.55, 34.58], [-118.56, 34.57]]]}}]}))
+    f, prefix = submit.build_submit_file("example", "v1", "test", tmp_path, root=tmp_path / "submissions")
+    assert prefix == "test/bench/submissions/example/v1" and f.stat().st_size < submit.UPLOAD_LIMIT

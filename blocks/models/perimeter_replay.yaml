@@ -1,0 +1,16 @@
+name: perimeter_replay
+kind: model
+version: "1"
+description: >
+  Replays a submitted prediction instead of running a model: turns timed perimeters
+  (the submission slot) into a canonical Prediction, so a model we don't run is
+  benchmarked exactly like one we do. A cell's arrival time is the time of the first
+  perimeter that contains it, so arrival times are as coarse as the submission's time
+  step (reported in the summary).
+requires:
+- perimeter_series
+produces:
+- perimeter
+- arrival_time
+execution:
+  image: elmfire                  # for matplotlib (the framework's preview); it needs only rasterio
